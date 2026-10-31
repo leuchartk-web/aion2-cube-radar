@@ -13,6 +13,14 @@ internal sealed class SettingsForm : Form
     private bool _preview;
     protected override bool ShowWithoutActivation => _preview;
     private static readonly Color Field = Color.FromArgb(27, 42, 55);
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        var dark = 1;
+        DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
+    }
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
     public SettingsForm(RadarSettings settings, OverlayActions actions, Action applied, Action resetPosition)
     {
         Text = T("settingsTitle");

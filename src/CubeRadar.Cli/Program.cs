@@ -8,6 +8,8 @@ CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 try
 {
+    System.Windows.Forms.Application.EnableVisualStyles();
+    System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
     AppPaths.Init();
     if (args is ["--version"]) { Console.WriteLine($"Radar de cubes FR {DumpSession.Version}"); return 0; }
     if (args is ["--preview", var output]) { Preview.Save(output); return 0; }
