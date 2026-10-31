@@ -20,6 +20,18 @@ La position est enregistrée à la fin du déplacement et ramenée sur un écran
 Ce mode permet aussi de placer un radar qui était masqué ou en pause, sans reprendre sa capture.
 Le radar reste sans bordure et ne demande pas de droits administrateur pour le placement.
 
+## Rechercher ma position
+
+Cliquer sur **Rechercher ma position** sous le radar, depuis son menu près de l’horloge ou dans les paramètres.
+Le bouton ferme/réouvre la capture et repart sur un décodeur réseau neuf sans effacer une position déjà connue ni les cubes existants.
+Si le radar est en pause, utiliser d’abord **Reprendre**. Attendre au moins cinq secondes entre les recherches.
+Cette opération n’envoie aucun paquet au jeu et n’automatise aucune action.
+
+Si la position reste inconnue, utiliser manuellement un buff sur son personnage ou changer de zone peut fournir de nouvelles coordonnées.
+Les seuls déplacements ne garantissent pas la réception d’un nouveau message de position.
+Dans les paramètres, le diagnostic permet de distinguer : pas de paquets, paquets sans flux de jeu reconnu, personnage non identifié ou coordonnées en attente.
+**« Pos. 0 s » avec un point bleu indique une position reçue ; « Aucun cube repéré » n’indique pas une panne de position.**
+
 ## Lire le radar
 
 | Symbole | Signification |
@@ -42,9 +54,9 @@ Le radar n’effectue aucune de ces actions à ta place.
 ## Régler sans se compliquer
 
 **⚙ → Radar** : portée, taille, opacité et axe du nord. Si le nord ne correspond pas à la minicarte, essayer un autre axe.
-Les cases de visibilité permettent de masquer le radar hors du jeu ou dans les menus.
-Sous Windows, sans droits administrateur, Alt peut être interprété comme une ouverture de menu et masquer le radar.
-Décocher « Masquer dans les menus du jeu » si ce comportement gêne.
+La case de visibilité permet de masquer le radar lorsque le jeu n’est plus au premier plan.
+Depuis la version 0.9.5, afficher le curseur avec **Alt** ne masque plus le radar. Il reste aussi visible dans les menus du jeu, pour que ses boutons soient accessibles.
+L’ancien réglage « Masquer dans les menus du jeu » est ignoré à la mise à jour. **Pause** ou **Afficher / masquer** permettent de le cacher volontairement.
 
 **⚙ → Alertes sonores** : activer le bip, régler le volume, choisir un WAV non compressé et tester le son.
 Le microphone et le son du jeu ne sont pas capturés. Les fichiers WAV très volumineux sont refusés pour limiter la mémoire utilisée.

@@ -244,7 +244,9 @@ public sealed partial class RadarEngine
         if (!PositionMessages.IsWorldPosition(x, y, z)) return;
         var fix = new PositionFix(SelfId ?? 0, x, y, z, kind);
         if (SelfId is null) _ownFixWithoutId = (fix, t);
-        else AdoptFix(fix, t);
+        // Map-load and teleport records explicitly describe our own position, even before self identity arrives.
+        // Do not invent an entity ID; the coordinates can already be displayed and used for cube distances.
+        AdoptFix(fix, t);
     }
 
     private void OnPosition(PositionFix fix, long t)

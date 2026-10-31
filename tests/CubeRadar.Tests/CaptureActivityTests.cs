@@ -25,6 +25,19 @@ public class CaptureActivityTests
     }
 
     [Fact]
+    public void Refresh_reopens_active_transport_but_does_not_resume_a_paused_capture()
+    {
+        var calls = new List<string>();
+        using var activity = new CaptureActivity(() => calls.Add("start"), () => calls.Add("stop"));
+        Assert.False(activity.Refresh(() => calls.Add("transport")));
+        Assert.Empty(calls);
+        activity.SetPaused(false);
+        Assert.True(activity.Refresh(() => calls.Add("transport")));
+        Assert.Equal(["start", "stop", "transport", "start"], calls);
+        Assert.False(activity.IsPaused);
+    }
+
+    [Fact]
     public void A_failed_start_does_not_report_an_active_capture()
     {
         using var activity = new CaptureActivity(() => throw new IOException("test"), () => Assert.Fail("nothing was started"));

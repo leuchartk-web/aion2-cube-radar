@@ -10,22 +10,14 @@ using static CubeRadar.Core.Localization.Text;
 namespace CubeRadar.Cli;
 
 /// <summary>
-/// Small always-on-top mini radar over the game: north up, we in the middle, live cubes with distance and height, our
-/// recent trail. It never takes focus and can be dragged with the mouse whenever it is visible (position saved on
-/// release); the mouse wheel zooms. Like other game overlays it hides while AION 2 is not the foreground window and,
-/// optionally, while the mouse cursor is visible (menus / UI mode: in the world the game hides the cursor), also when
-/// the cursor is over it, so it never covers a menu. A cursor that comes out while Alt is held (AION 2 shows it then)
-/// does not count as a menu as long as Alt stays down; this needs admin rights, see <see cref="Elevation"/>. While the
-/// settings window is open it stays visible, so it can be moved and zoomed then. Only Windows window/cursor/key state is
-/// read, nothing from the game itself.
-/// Ctrl+Shift+F10 switches it off/on, Ctrl+Shift+F11 opens/closes the settings, Ctrl+Shift+F12 cycles the range.
-/// Nothing can draw over exclusive fullscreen.
+/// Borderless, non-activating native window above AION 2. Cursor visibility and Alt never hide it.
+/// Foreground filtering, manual hiding and capture pause control its normal visibility; placement and settings
+/// can reveal it temporarily. No drawing into the game or exclusive-fullscreen support.
 /// </summary>
 internal sealed class OverlayWindow : Form
 {
     private const int WsExLayered = 0x80000, WsExToolWindow = 0x80, WsExNoActivate = 0x08000000, WsExTopmost = 0x8;
     private const int WmNcHitTest = 0x84, WmMouseActivate = 0x21, WmEnterSizeMove = 0x231, WmExitSizeMove = 0x232, HtCaption = 2, MaNoActivate = 3;
-    private const int CursorShowing = 0x1, VkMenu = 0x12;
     private const byte AcSrcAlpha = 0x1;
     private const int UlwAlpha = 0x2;
     private static readonly IntPtr HwndTopmost = new(-1);
@@ -42,8 +34,6 @@ internal sealed class OverlayWindow : Form
     private bool _placementMode;
     private int[] _gamePids = [];
     private long _gamePidsAt = -10_000;
-    private long _cursorShownSince = -1;
-    private bool _cursorByAlt;
     private NotifyIcon? _tray;
     private ToolStripMenuItem? _pauseItem;
     private ToolStripMenuItem? _moveItem;
@@ -107,7 +97,7 @@ internal sealed class OverlayWindow : Form
             case WmNcHitTest:
                 var screen = new Point(unchecked((short)(long)m.LParam), unchecked((short)((long)m.LParam >> 16)));
                 var point = PointToClient(screen);
-                if (OverlayRenderer.GearRect(RenderScale).Contains(point) || OverlayRenderer.PauseRect(RenderScale).Contains(point) || OverlayRenderer.MoveRect(RenderScale).Contains(point))
+                if (OverlayRenderer.GearRect(RenderScale).Contains(point) || OverlayRenderer.PauseRect(RenderScale).Contains(point) || OverlayRenderer.MoveRect(RenderScale).Contains(point) || OverlayRenderer.FindRect(RenderScale).Contains(point))
                 {
                     m.Result = 1; // HTCLIENT: the gear button gets the click
                     return;
@@ -137,6 +127,7 @@ internal sealed class OverlayWindow : Form
         if (e.Button == MouseButtons.Left && OverlayRenderer.GearRect(RenderScale).Contains(e.Location)) OpenSettings();
         else if (e.Button == MouseButtons.Left && OverlayRenderer.PauseRect(RenderScale).Contains(e.Location)) _actions.SetPaused?.Invoke(!Paused);
         else if (e.Button == MouseButtons.Left && OverlayRenderer.MoveRect(RenderScale).Contains(e.Location)) TogglePlacement();
+        else if (e.Button == MouseButtons.Left && OverlayRenderer.FindRect(RenderScale).Contains(e.Location)) _actions.FindPosition?.Invoke();
         base.OnMouseClick(e);
     }
 
@@ -223,7 +214,7 @@ internal sealed class OverlayWindow : Form
             Math.Clamp(Top, screen.Top, Math.Max(screen.Top, screen.Bottom - Height)));
     }
 
-    /// <summary>Placement overrides cursor/menu hiding, so Alt can expose the game's pointer without elevation.</summary>
+    /// <summary>Placement reveals a hidden or paused radar without resuming its capture.</summary>
     public void TogglePlacement() => Ui(() =>
     {
         _placementMode = !_placementMode;
@@ -279,6 +270,7 @@ internal sealed class OverlayWindow : Form
         _moveItem = new ToolStripMenuItem(T("move"), null, (_, _) => TogglePlacement());
         menu.Items.Add(_pauseItem);
         menu.Items.Add(_moveItem);
+        menu.Items.Add(T("findPosition"), null, (_, _) => _actions.FindPosition?.Invoke());
         menu.Items.Add(T("toggle"), null, (_, _) => ToggleVisible());
         menu.Items.Add(T("zoom"), null, (_, _) => CycleRange());
         menu.Items.Add(new ToolStripSeparator());
@@ -359,7 +351,7 @@ internal sealed class OverlayWindow : Form
         else Hide();
     }
 
-    /// <summary>Only while the game is in front, and (optionally) not while its cursor is out for a menu.</summary>
+    /// <summary>Only while the game is in front when foreground filtering is enabled.</summary>
     private bool WantedOverGame()
     {
         if (SettingsOpen) return true; // the user is adjusting it: keep it visible to drag and zoom
@@ -372,39 +364,31 @@ internal sealed class OverlayWindow : Form
         if (_gamePids.Length == 0) return !_settings.OverlayOnlyWhenGameFocused;
 
         GetWindowThreadProcessId(GetForegroundWindow(), out var pid);
+        return WantedForForeground(pid);
+    }
+
+    private bool WantedForForeground(uint pid)
+    {
         // Our own window is in front (tray menu, a dialog): leave the overlay as it is. Showing it now would close the
         // tray menu that is just opening (right-click on the tray icon brings our process to the front).
         if (pid == Environment.ProcessId) return Visible;
         if (!_gamePids.Contains((int)pid)) return !_settings.OverlayOnlyWhenGameFocused;
 
-        if (!_settings.OverlayHideInMenus) return true;
-        var info = new CursorInfo { Size = Marshal.SizeOf<CursorInfo>() };
-        var cursorShown = GetCursorInfo(ref info) && (info.Flags & CursorShowing) != 0;
-        if (!cursorShown)
-        {
-            _cursorShownSince = -1;
-            return true;
-        }
-        // Without admin rights Windows reports no keys while the (elevated) game is in front: then Alt counts as a menu.
-        var altDown = (GetAsyncKeyState(VkMenu) & 0x8000) != 0;
-        if (_cursorShownSince < 0)
-        {
-            _cursorShownSince = now;
-            _cursorByAlt = altDown; // came out while Alt is held (AION 2 shows it then), not for a menu
-        }
-        if (_cursorByAlt)
-        {
-            if (altDown) return true;
-            _cursorByAlt = false; // Alt released but the cursor stays out: a menu after all
-            _cursorShownSince = now;
-        }
-        return now - _cursorShownSince < 300; // brief cursor flashes do not make it flicker
+        // Never infer a menu from a visible cursor: Alt uses that cursor to reach our buttons,
+        // and Windows may hide the keyboard state of an elevated game from this normal process.
+        return true;
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _timer.Dispose();
         base.OnFormClosed(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _timer.Dispose();
+        base.Dispose(disposing);
     }
 
     /// <summary>Native Windows smoke checks on the CI runner, with no game, capture, hotkeys or sound.</summary>
@@ -416,13 +400,25 @@ internal sealed class OverlayWindow : Form
             try
             {
                 var paused = true;
+                var searches = 0;
                 var settings = new RadarSettings { OverlayVisible = false, OverlayOnlyWhenGameFocused = false };
                 var engine = new RadarEngine(new RadarConfig(), trackPlayers: false);
                 var actions = new OverlayActions(() => { }, () => { }, () => "-y", _ => { }, () => { },
-                    GetPaused: () => paused, SetPaused: value => paused = value);
+                    GetPaused: () => paused, SetPaused: value => paused = value, FindPosition: () => searches++);
                 using var window = new OverlayWindow(engine.Snapshot, settings, actions);
                 _ = window.Handle;
                 void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+                var legacyPath = Path.GetTempFileName();
+                try
+                {
+                    File.WriteAllText(legacyPath, "{\"OverlayHideInMenus\":true,\"CapturePaused\":true}");
+                    var imported = RadarSettings.Load(legacyPath);
+                    using var migrated = new OverlayWindow(engine.Snapshot, imported, actions);
+                    migrated._gamePids = [42];
+                    Require(migrated.WantedForForeground(42), "Legacy cursor/menu hiding must not hide a foreground game radar");
+                    Require(imported.CapturePaused, "Legacy settings migration must preserve explicit capture pause");
+                }
+                finally { File.Delete(legacyPath); }
                 window.UpdateVisibility();
                 Require(!window.Visible, "Paused capture must hide the normal overlay");
                 window.TogglePlacement();
@@ -441,6 +437,9 @@ internal sealed class OverlayWindow : Form
                 settings.OverlayVisible = true;
                 window.UpdateVisibility();
                 Require(window.Visible, "Active borderless overlay must be visible when focus filtering is disabled");
+                var searchRect = OverlayRenderer.FindRect(window.RenderScale);
+                window.OnMouseClick(new MouseEventArgs(MouseButtons.Left, 1, searchRect.Left + 2, searchRect.Top + 2, 0));
+                Require(searches == 1 && window.Visible, "Position search button must call its action without hiding the radar");
                 var rect = OverlayRenderer.PauseRect(window.RenderScale);
                 window.OnMouseClick(new MouseEventArgs(MouseButtons.Left, 1, rect.Left + 2, rect.Top + 2, 0));
                 window.Tick();
@@ -459,15 +458,6 @@ internal sealed class OverlayWindow : Form
     }
 
     private static bool OnSomeScreen(Point p) => Screen.AllScreens.Any(s => s.WorkingArea.Contains(p));
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct CursorInfo
-    {
-        public int Size;
-        public int Flags;
-        public IntPtr Cursor;
-        public Point Position;
-    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BlendFunction
@@ -494,11 +484,7 @@ internal sealed class OverlayWindow : Form
     [DllImport("gdi32.dll")]
     private static extern bool DeleteObject(IntPtr obj);
 
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorInfo(ref CursorInfo info);
 
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vk);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
@@ -526,7 +512,7 @@ internal static class Palette
 /// <summary>Draws the mini radar; also used to render a PNG for checking the layout.</summary>
 internal static class OverlayRenderer
 {
-    private const float Side = 260, Header = 30, Margin = 21, Footer = 40;
+    private const float Side = 260, Header = 30, Margin = 21, Footer = 65;
     private const double LevelMetres = 3, SendRadiusM = 100;
 
     public static Size Measure(float scale) =>
@@ -538,6 +524,7 @@ internal static class OverlayRenderer
 
     public static Rectangle PauseRect(float scale) => Rectangle.Round(new RectangleF((Side - 63) * scale, (Header + Side) * scale, 59 * scale, 19 * scale));
     public static Rectangle MoveRect(float scale) => Rectangle.Round(new RectangleF((Side - 72) * scale, (Header + Side + 20) * scale, 68 * scale, 19 * scale));
+    public static Rectangle FindRect(float scale) => Rectangle.Round(new RectangleF(6 * scale, (Header + Side + 43) * scale, (Side - 12) * scale, 19 * scale));
 
     public static void Render(Graphics g, Size size, RadarSnapshot? s, float scale, int rangeM, bool paused = false, bool placement = false)
     {
@@ -567,9 +554,11 @@ internal static class OverlayRenderer
         {
             g.DrawRectangle(buttonBorder, Side - 63, Header + Side, 59, 19);
             g.DrawRectangle(buttonBorder, Side - 72, Header + Side + 20, 68, 19);
+            g.DrawRectangle(buttonBorder, 6, Header + Side + 43, Side - 12, 19);
         }
         Text(g, T(paused ? "resumeShort" : "pauseShort"), tiny, Palette.Visible, Side - 34, Header + Side + 3, center: true);
         Text(g, T(placement ? "endMoveShort" : "moveShort"), tiny, Palette.Me, Side - 38, Header + Side + 23, center: true);
+        Text(g, T("findPosition"), small, paused ? Palette.Muted : Palette.Me, Side / 2, Header + Side + 44, center: true);
         var me = Me(s);
         if (s is not null)
         {

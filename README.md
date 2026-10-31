@@ -26,6 +26,27 @@ Si Npcap a été installé en mode réservé aux administrateurs, son accès peu
 
 **[Guide français et légende des symboles](docs/GUIDE_FR.md)**
 
+## Position et diagnostic (0.9.5)
+
+Le bouton **Rechercher ma position** est accessible sous le radar, dans les paramètres et près de l’horloge.
+Il rouvre la capture et réinitialise uniquement le décodage du transport réseau, en conservant la position et les cubes déjà connus.
+Il ne reprend pas un radar mis en pause et n’envoie aucune commande au jeu. Les demandes sont espacées de cinq secondes.
+Le diagnostic affiche le nombre de paquets reçus, de flux reconnus et de messages décodés, puis l’état de la position.
+La présence d’une position ne signifie pas qu’un cube a été découvert : le point bleu est ton personnage et « Aucun cube repéré » indique seulement l’absence de cube identifié dans les données reçues.
+
+Les coordonnées reçues dans un message de chargement ou téléportation sont désormais affichées même si l’identifiant du personnage n’a pas encore été reçu. Aucun identifiant n’est inventé.
+L’âge de la position affichée continue d’augmenter même si le flux s’arrête.
+Un bouton ne peut pas contraindre le serveur à transmettre des coordonnées ; utiliser manuellement un buff sur soi-même ou changer de zone peut aider.
+La cause exacte d’une absence de position dans une session réelle nécessite le diagnostic et n’est pas déduite de ces seules corrections.
+
+## Correction Alt / curseur (0.9.5)
+
+L’apparition du curseur, y compris avec **Alt**, ne masque plus le radar et ses boutons.
+La détection de menus fondée sur le curseur et la lecture de l’état de la touche Alt ont été retirées.
+L’ancien réglage `OverlayHideInMenus` est ignoré, même s’il était activé dans les préférences de la version précédente.
+Le radar reste donc visible dans les menus du jeu ; **Pause**, **Afficher / masquer** et le masquage hors du jeu restent disponibles.
+Aucun besoin de lancer le radar comme administrateur pour cette correction.
+
 ## Fenêtré sans bordure, placement et pause (0.9.4)
 
 Dans les options vidéo d’AION 2, sélectionner **fenêtré sans bordure** (ou fenêtré). Le radar utilise une fenêtre native toujours au-dessus, sans injection dans le jeu. Le plein écran exclusif reste incompatible.

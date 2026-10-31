@@ -5,7 +5,7 @@ using static CubeRadar.Core.Localization.Text;
 namespace CubeRadar.Cli;
 
 internal sealed record OverlayActions(Action Quit, Action TestSound, Func<string> GetNorth, Action<string> SetNorth, Action OpenData,
-    Func<string>? GetStatus = null, Func<bool>? GetPaused = null, Action<bool>? SetPaused = null);
+    Func<string>? GetStatus = null, Func<bool>? GetPaused = null, Action<bool>? SetPaused = null, Action? FindPosition = null);
 
 /// <summary>Bounded, scrollable native settings. All changes apply immediately.</summary>
 internal sealed class SettingsForm : Form
@@ -90,6 +90,14 @@ internal sealed class SettingsForm : Form
         activity.Controls.Add(pause);
         activity.Controls.Add(Button("move", () => { moveRadar?.Invoke(); Close(); }));
         radar.Controls.Add(activity);
+        radar.Controls.Add(Button("findPosition", () => actions.FindPosition?.Invoke()));
+        var liveState = new Label { AutoSize = true, MaximumSize = new Size(510, 0), ForeColor = Palette.Me, Margin = new Padding(0, 4, 0, 8) };
+        var liveTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        void RefreshState() => liveState.Text = actions.GetStatus?.Invoke() ?? T("captureWaiting");
+        liveTimer.Tick += (_, _) => RefreshState();
+        RefreshState(); liveTimer.Start();
+        Disposed += (_, _) => liveTimer.Dispose();
+        radar.Controls.Add(liveState);
         radar.Controls.Add(Note("moveHelp"));
         Heading(radar, "appearance");
         Row(radar, "range", Combo(OverlayWindow.Ranges.Select(r => $"{r} m").ToArray(), Array.IndexOf(OverlayWindow.Ranges, settings.OverlayRangeM), i => { settings.OverlayRangeM = OverlayWindow.Ranges[i]; Save(); }));
@@ -101,7 +109,6 @@ internal sealed class SettingsForm : Form
         _tips.SetToolTip(north, T("northHelp")); Row(radar, "north", north);
         Heading(radar, "visibility");
         Check(radar, "focused", settings.OverlayOnlyWhenGameFocused, v => { settings.OverlayOnlyWhenGameFocused = v; Save(); });
-        Check(radar, "menus", settings.OverlayHideInMenus, v => { settings.OverlayHideInMenus = v; Save(); });
         radar.Controls.Add(Note("visibilityHelp")); radar.Controls.Add(Button("resetPosition", resetPosition));
         var audio = Page("tabSound");
         Check(audio, "soundEnabled", settings.SoundEnabled, v => { settings.SoundEnabled = v; Save(); });

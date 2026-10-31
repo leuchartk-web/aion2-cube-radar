@@ -10,5 +10,14 @@ public sealed class CaptureActivity(Action start, Action stop) : IDisposable
         if (paused) stop(); else start();
         IsPaused = paused;
     }
+    /// <summary>Reopen active capture after resetting transport only; a paused capture remains paused.</summary>
+    public bool Refresh(Action resetTransport)
+    {
+        if (IsPaused) return false;
+        SetPaused(true);
+        resetTransport();
+        SetPaused(false);
+        return true;
+    }
     public void Dispose() => SetPaused(true);
 }

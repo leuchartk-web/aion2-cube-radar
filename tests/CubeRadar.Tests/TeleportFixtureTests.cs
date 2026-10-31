@@ -53,14 +53,16 @@ public class TeleportFixtureTests
     }
 
     [Fact]
-    public void Teleport_before_the_own_id_is_known_is_adopted_later()
+    public void Own_map_position_is_displayed_before_identity_and_bound_to_identity_later()
     {
         var (_, frames) = Load();
         var engine = new RadarEngine(new RadarConfig());
         var load = frames.First(f => f.Op == 0x2136);
         engine.OnFrame(load.T, load.Op, load.Body);
         Assert.Null(engine.SelfId);
-        Assert.Null(engine.SelfFix);
+        Assert.NotNull(engine.SelfFix);
+        Assert.Equal(0u, engine.SelfFix.Value.EntityId);
+        Assert.Equal(PositionKind.MapLoad, engine.SelfFix.Value.Kind);
 
         engine.OnFrame(load.T + 100, 0x4A36, SelfVote);
         engine.OnFrame(load.T + 200, 0x4A36, SelfVote);

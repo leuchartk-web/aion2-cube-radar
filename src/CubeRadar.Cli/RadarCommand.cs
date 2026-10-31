@@ -24,6 +24,9 @@ internal static class RadarCommand
         if (!LiveSniffer.IsNpcapInstalled()) { NativeConsole.Notify(T("npcapMissing")); return 2; }
         var settings = RadarSettings.Load(Path.Combine(AppPaths.DataDir, "settings.json"));
         var pauseRequested = settings.CapturePaused;
+        var searchRequested = 0;
+        long lastSearchAt = -10000;
+        long packetCount = 0;
         var cfg = RadarConfig.Load(AppPaths.Config("radar.json"), AppPaths.Config("cubes.json"), AppPaths.DataRoot);
         var spots = SpotIndex.TryLoad(cfg.SpotsCsv);
         using var store = new SqliteRadarStore(Path.Combine(AppPaths.DataDir, "radar.db"), "live_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss"));
@@ -60,6 +63,7 @@ internal static class RadarCommand
         using var sniffer = new LiveSniffer(new LiveSnifferOptions { DeviceName = device });
         sniffer.PacketArrived += (raw, _) =>
         {
+            Interlocked.Increment(ref packetCount);
             if (Volatile.Read(ref pauseRequested) || !SegmentReader.TryRead(raw, out var seg)) return;
             lock (gate) tracker.OnSegment(seg.TimeMs, seg.Key, seg.Seq, seg.Syn, seg.FinOrRst, seg.Payload);
         };
@@ -73,8 +77,7 @@ internal static class RadarCommand
                 tracker = NewTracker();
             }
         }
-        using var activity = new CaptureActivity(() => { ResetTracking(); sniffer.Start(); },
-            () => { sniffer.Stop(); ResetTracking(); CubeSound.Close(); });
+        using var activity = new CaptureActivity(sniffer.Start, () => { sniffer.Stop(); CubeSound.Close(); });
         void RequestPause(bool paused)
         {
             Volatile.Write(ref pauseRequested, paused);
@@ -82,13 +85,45 @@ internal static class RadarCommand
             settings.Save();
             captureChanged.Set(); // the main worker stops/starts capture; the UI never waits for Npcap
         }
+        void FindPosition()
+        {
+            if (Volatile.Read(ref pauseRequested)) { overlay?.Notify(T("searchPaused")); return; }
+            var now = Environment.TickCount64;
+            var previous = Interlocked.Read(ref lastSearchAt);
+            if (now - previous < 5000 || Interlocked.CompareExchange(ref lastSearchAt, now, previous) != previous)
+            { overlay?.Notify(T("searchBusy")); return; }
+            Interlocked.Exchange(ref searchRequested, 1);
+            captureChanged.Set();
+            overlay?.Notify(T("searchHint"));
+        }
+        string Status()
+        {
+            if (Volatile.Read(ref pauseRequested)) return T("pausedStatus");
+            lock (gate)
+            {
+                var s = engine.Snapshot();
+                var detail = s.Self is { } fix ? T("positionReceived", Math.Max(0, (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - fix.TimeMs) / 1000))
+                    : tracker.GameFlows.Count == 0 ? T("waitingGameStream")
+                    : s.SelfId is null ? T("waitingIdentity") : T("waitingOwnPosition");
+                return sniffer.Status + "\n" + T("captureDiagnostics", Interlocked.Read(ref packetCount), tracker.GameFlows.Count, s.Frames) + "\n" + detail;
+            }
+        }
+        RadarSnapshot DisplaySnapshot()
+        {
+            var s = Volatile.Read(ref engine).Snapshot();
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            return s with
+            {
+                Self = s.Self is { } fix ? fix with { AgeMs = Math.Max(fix.AgeMs, now - fix.TimeMs) } : null,
+                Ring = s.Ring is { } ring ? ring with { AgeMs = Math.Max(ring.AgeMs, now - ring.TimeMs) } : null,
+            };
+        }
         var actions = new OverlayActions(stop.Set, Play, () => engine.North, north =>
         {
             lock (gate) { engine.SetNorth(north); settings.North = engine.North; }
             settings.Save();
         }, () => Elevation.Open(AppPaths.DataRoot),
-            () => Volatile.Read(ref pauseRequested) ? T("pausedStatus") : sniffer.Status,
-            () => Volatile.Read(ref pauseRequested), RequestPause);
+            Status, () => Volatile.Read(ref pauseRequested), RequestPause, FindPosition);
         using var keys = new GlobalHotkeys(GlobalHotkeys.Parse("ctrl+shift+F8=pause,ctrl+shift+F9=move,ctrl+shift+F10=visible,ctrl+shift+F11=settings,ctrl+shift+F12=range"), b =>
         {
             if (b.Label == "pause") RequestPause(!Volatile.Read(ref pauseRequested));
@@ -99,10 +134,21 @@ internal static class RadarCommand
         });
         try
         {
-            overlay = OverlayWindow.Start(() => Volatile.Read(ref engine).Snapshot(), settings, actions);
+            overlay = OverlayWindow.Start(DisplaySnapshot, settings, actions);
             overlay.ShowTray();
             foreach (var (binding, ok, _) in keys.Results) if (!ok) overlay.Notify(T("hotkeyConflict", binding.Display));
-            do { activity.SetPaused(Volatile.Read(ref pauseRequested)); }
+            do
+            {
+                var paused = Volatile.Read(ref pauseRequested);
+                if (paused != activity.IsPaused)
+                {
+                    if (!paused) ResetTracking();
+                    activity.SetPaused(paused);
+                    if (paused) ResetTracking();
+                }
+                if (Interlocked.Exchange(ref searchRequested, 0) != 0 && !paused)
+                    activity.Refresh(() => { lock (gate) tracker = NewTracker(); });
+            }
             while (WaitHandle.WaitAny([stop.WaitHandle, captureChanged]) != 0);
         }
         finally

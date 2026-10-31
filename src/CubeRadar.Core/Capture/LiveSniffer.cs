@@ -71,6 +71,7 @@ public sealed class LiveSniffer : IDisposable
     public void Start()
     {
         if (_monitor is not null) return;
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
         SetStatus(T("captureStarting"));
         _monitor = Task.Run(() => MonitorLoop(_cts.Token));
