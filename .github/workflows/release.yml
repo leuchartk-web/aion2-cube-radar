@@ -1,60 +1,36 @@
-# Pushing a version tag (e.g. v0.8.1) builds "Cube Radar.exe" on GitHub, runs the tests and publishes the release
-# that the radar's updater looks for. The tag must match <Version> in both project files.
-name: Release
-
+name: Version française Windows
 on:
   push:
-    tags: ["v*"]
-
+    branches: [francais-cubes]
+    tags: ["v*-fr"]
+  workflow_dispatch:
 permissions:
-  contents: write
-
+  contents: read
 jobs:
-  release:
+  windows:
     runs-on: windows-latest
-    timeout-minutes: 30
-    env:
-      TAG: ${{ github.ref_name }}
-    defaults:
-      run:
-        shell: pwsh
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # the release notes list the commits since the previous tag
-
-      # checkout may hand over an annotated tag as a lightweight one; fetch it again for its message
-      - name: Fetch the tag
-        run: git fetch --force origin "refs/tags/${env:TAG}:refs/tags/${env:TAG}"
-
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-
-      - name: Tag matches the project version
-        run: |
-          foreach ($p in "src/CubeRadar.Cli/CubeRadar.Cli.csproj", "src/CubeRadar.Core/CubeRadar.Core.csproj") {
-            $v = ([xml](Get-Content $p)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
-            if ("v$v" -ne $env:TAG) { throw "$p has version $v, the tag is $env:TAG" }
-          }
-
-      # The pcapng round trip needs Npcap's libpcap, which the runner does not have.
-      - name: Test
-        run: dotnet test CubeRadar.slnx -c Release --filter "Needs!=Npcap"
-
-      - name: Test offline tools and fixture privacy
+      - name: Tests .NET hors Npcap
+        run: dotnet test CubeRadar.slnx -c Release --filter "Needs!=Npcap" --logger "trx;LogFileName=tests.trx"
+      - name: Tests Python et traductions
         run: python -m unittest discover -s tests -p "test_*.py"
-
-      - name: Test web UI
-        run: node --test tests/player-ui.test.cjs
-
-      - name: Build Cube Radar.exe
+      - name: Aperçus sans jeu ni capture réseau
+        run: dotnet run --project src/CubeRadar.Cli -c Release --no-build -- --preview previews
+      - name: Compiler et empaqueter
+        shell: pwsh
         run: ./tools/package.ps1
-
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          Copy-Item "dist/Cube Radar.exe" "dist/Cube.Radar.exe" # the asset name the updater looks for
-          ./tools/release-notes.ps1 -Tag $env:TAG -Exe "dist/Cube.Radar.exe" -Out "dist/release-notes.md"
-          gh release create $env:TAG "dist/Cube.Radar.exe" --verify-tag --title "Cube Radar $($env:TAG.TrimStart('v')): Hidden Cube Radar for Aion 2" --notes-file "dist/release-notes.md"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: radar-cubes-fr-windows
+          path: |
+            dist/*.zip
+            dist/*.exe
+            dist/SHA256SUMS.txt
+            previews/*.png
+            tests/**/TestResults/*.trx
+          if-no-files-found: error

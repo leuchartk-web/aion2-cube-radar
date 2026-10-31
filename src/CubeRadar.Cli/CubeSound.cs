@@ -1,3 +1,4 @@
+using static CubeRadar.Core.Localization.Text;
 using System.Runtime.InteropServices;
 using CubeRadar.Core.Audio;
 
@@ -37,26 +38,28 @@ internal static class CubeSound
         {
             try
             {
+                if (new FileInfo(wavFile).Length > 10 * 1024 * 1024)
+                    throw new IOException(T("soundTooLarge"));
                 wav = File.ReadAllBytes(wavFile);
                 switch (WavVolume.Scale(wav, volumePct))
                 {
                     case WavVolume.ScaleResult.NotWav:
-                        note = $"sound file is not a WAV file, using the beep: {wavFile}";
+                        note = T("soundNotWav", wavFile);
                         wav = null;
                         break;
                     case WavVolume.ScaleResult.UnsupportedFormat:
-                        note = $"sound file is compressed, volume not adjustable: {wavFile}";
+                        note = T("soundCompressed", wavFile);
                         break;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                note = $"sound file not readable ({ex.Message}), using the beep";
+                note = T("soundUnreadable", ex.Message);
             }
         }
         if (wav is not null && Start(wav)) return note;
-        if (wav is not null) note = $"sound file not playable, using the beep: {wavFile}";
-        if (!Start(WavVolume.Beep(volumePct))) note = (note is null ? "" : note + "; ") + "no sound output device";
+        if (wav is not null) note = T("soundUnplayable", wavFile);
+        if (!Start(WavVolume.Beep(volumePct))) note = (note is null ? "" : note + "; ") + T("noAudio");
         return note;
     }
 

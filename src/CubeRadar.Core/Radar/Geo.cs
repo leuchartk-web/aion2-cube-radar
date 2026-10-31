@@ -1,3 +1,4 @@
+using static CubeRadar.Core.Localization.Text;
 namespace CubeRadar.Core.Radar;
 
 /// <summary>
@@ -12,7 +13,7 @@ public readonly record struct Orientation(double NorthX, double NorthY, double E
         "+y" or "y" => new Orientation(0, 1, -1, 0),
         "+x" or "x" => new Orientation(1, 0, 0, 1),
         "-x" => new Orientation(-1, 0, 0, -1),
-        _ => throw new FormatException($"north must be -y, +y, +x or -x, not \"{north}\""),
+        _ => throw new FormatException(T("northInvalid", north)),
     };
 
     /// <summary>Compass bearing 0–360° (0 = north, 90 = east) from (x0, y0) to (x1, y1).</summary>

@@ -2,6 +2,7 @@
 // Changes: hands out raw packets (for the pcapng recording) instead of game events; the BPF filter always includes
 // the game port and only grows (each filter change flushes Npcap's buffer); status as plain text.
 using System.Net;
+using static CubeRadar.Core.Localization.Text;
 using SharpPcap;
 using SharpPcap.LibPcap;
 
@@ -38,7 +39,7 @@ public sealed class LiveSniffer : IDisposable
     public event Action<RawCapture, LibPcapLiveDevice>? PacketArrived;
     public event Action<string>? StatusChanged;
 
-    public string Status { get; private set; } = "stopped";
+    public string Status { get; private set; } = T("captureStopped");
     public string? DeviceDescription { get; private set; }
     public string? Filter => _filter;
 
@@ -71,7 +72,7 @@ public sealed class LiveSniffer : IDisposable
     {
         if (_monitor is not null) return;
         _cts = new CancellationTokenSource();
-        SetStatus("starting");
+        SetStatus(T("captureStarting"));
         _monitor = Task.Run(() => MonitorLoop(_cts.Token));
     }
 
@@ -81,7 +82,7 @@ public sealed class LiveSniffer : IDisposable
         try { _monitor?.Wait(3_000); } catch (AggregateException) { }
         _monitor = null;
         CloseDevice();
-        SetStatus("stopped");
+        SetStatus(T("captureStopped"));
     }
 
     public void Dispose()
@@ -100,16 +101,16 @@ public sealed class LiveSniffer : IDisposable
             }
             catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException)
             {
-                SetStatus("Npcap is not installed (npcap.com)");
+                SetStatus(T("npcapMissing"));
             }
             catch (PcapException ex)
             {
-                SetStatus("capture error: " + ex.Message);
+                SetStatus(T("captureError", ex.Message));
                 CloseDevice();
             }
             try
             {
-                await Task.Delay(2_000, ct).ConfigureAwait(false);
+                await Task.Delay(3_000, ct).ConfigureAwait(false);
             }
             catch (TaskCanceledException)
             {
@@ -120,9 +121,17 @@ public sealed class LiveSniffer : IDisposable
 
     private void Refresh()
     {
-        var devices = CaptureDeviceList.Instance.OfType<LibPcapLiveDevice>().ToList();
         var pids = GameProcessLocator.FindGameProcessIds();
         var connections = pids.Length == 0 ? [] : GameProcessLocator.FindConnections(pids);
+        // Release the adapter when the game/connection goes away, including a manually selected adapter.
+        if (pids.Length == 0 || connections.Count == 0)
+        {
+            CloseDevice();
+            _extraHosts.Clear();
+            SetStatus(T(pids.Length == 0 ? "captureNoGame" : "captureWaiting"));
+            return;
+        }
+        var devices = CaptureDeviceList.Instance.OfType<LibPcapLiveDevice>().ToList();
         foreach (var c in connections.Where(c => c.RemotePort != StreamTracker.GamePort))
             _extraHosts.Add($"(host {c.RemoteIp} and port {c.RemotePort})");
         var filter = _extraHosts.Count == 0
@@ -134,22 +143,11 @@ public sealed class LiveSniffer : IDisposable
             var dev = devices.FirstOrDefault(d => d.Name == forced);
             if (dev is null)
             {
-                SetStatus($"adapter not found: {forced}");
+                SetStatus(T("adapterMissing", forced));
                 return;
             }
             EnsureDevice(dev, filter);
-            SetStatus($"capturing on {Describe(dev)}");
-            return;
-        }
-
-        if (pids.Length == 0)
-        {
-            SetStatus(_device is null ? "AION 2 is not running" : $"AION 2 not running · still capturing on {DeviceDescription}");
-            return;
-        }
-        if (connections.Count == 0)
-        {
-            SetStatus(_device is null ? "waiting for the game to connect" : $"no game connection · still capturing on {DeviceDescription}");
+            SetStatus(T("captureActive", Describe(dev)));
             return;
         }
 
@@ -163,11 +161,11 @@ public sealed class LiveSniffer : IDisposable
         }
         if (device is null)
         {
-            SetStatus("no Npcap adapter carries the game connection (VPN? use --device)");
+            SetStatus(T("adapterUnavailable"));
             return;
         }
         EnsureDevice(device, filter);
-        SetStatus($"capturing on {Describe(device)}");
+        SetStatus(T("captureActive", Describe(device)));
     }
 
     private void EnsureDevice(LibPcapLiveDevice device, string filter)

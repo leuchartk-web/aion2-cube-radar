@@ -1,0 +1,13 @@
+RADAR DE CUBES FR — 0.9.3
+
+Prérequis : Windows 10/11 x64, Npcap installé séparément, AION 2 Global en mode fenêtré ou sans bordure.
+Extraire le ZIP puis lancer Radar de cubes FR.exe. Aucun lancement automatique avec Windows.
+Paramètres : bouton engrenage ou icône près de l’horloge. Quitter depuis cette icône.
+
+Lecture réseau passive, pas de détection audio. Aucun suivi d’ennemis, enregistrement de paquets,
+serveur web ou mise à jour automatique. Aucune garantie d’absence de détection ou de sanction.
+
+Guide complet : docs/GUIDE_FR.md dans source.zip ou sur GitHub.
+Dépôt : https://github.com/leuchartk-web/aion2-cube-radar
+Origine : https://github.com/dr89mh/aion2-cube-radar (v0.9.2)
+GPL-3.0 : licence et sources correspondantes incluses.

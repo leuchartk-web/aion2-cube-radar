@@ -1,314 +1,136 @@
 using System.Drawing;
 using System.Windows.Forms;
+using static CubeRadar.Core.Localization.Text;
 
 namespace CubeRadar.Cli;
 
-/// <summary>What the overlay and its settings window can ask the radar to do.</summary>
-internal sealed record OverlayActions(
-    Action OpenWeb,
-    Action Quit,
-    Action TestSound,
-    Func<string> GetNorth,
-    Action<string> SetNorth,
-    Action OpenCaptures,
-    Updater? Updater = null,
-    Func<string>? GetFaction = null,
-    Action<string>? SetFaction = null);
+internal sealed record OverlayActions(Action Quit, Action TestSound, Func<string> GetNorth, Action<string> SetNorth, Action OpenData);
 
-/// <summary>
-/// Settings opened from the overlay's gear button (or the tray). Every change applies at once and is saved; there is
-/// no OK / Cancel. Runs on the overlay's UI thread.
-/// </summary>
+/// <summary>Bounded, scrollable native settings. All changes apply immediately.</summary>
 internal sealed class SettingsForm : Form
 {
-    private static readonly Color Bg = Color.FromArgb(22, 27, 33), Field = Color.FromArgb(32, 39, 47), Fg = Color.FromArgb(230, 235, 240),
-        Muted = Color.FromArgb(139, 150, 163), Accent = Color.FromArgb(77, 163, 255), Danger = Color.FromArgb(255, 107, 91);
-
-    private static readonly (string Value, string Text)[] Norths =
-        [("-y", "−Y (Standard)"), ("+y", "+Y"), ("+x", "+X"), ("-x", "−X")];
-
+    private readonly ToolTip _tips = new() { AutoPopDelay = 15000 };
     private bool _preview;
-
-    /// <summary>The PNG preview must not steal the focus from the game.</summary>
     protected override bool ShowWithoutActivation => _preview;
-
-    protected override void OnHandleCreated(EventArgs e)
+    private static readonly Color Field = Color.FromArgb(27, 42, 55);
+    public SettingsForm(RadarSettings settings, OverlayActions actions, Action applied, Action resetPosition)
     {
-        base.OnHandleCreated(e);
-        var dark = 1;
-        DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int)); // DWMWA_USE_IMMERSIVE_DARK_MODE: dark title bar
-    }
-
-    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
-
-    public SettingsForm(RadarSettings settings, OverlayActions actions, Action applied, Action resetPosition, Action confirmUpdate)
-    {
-        Text = "Cube Radar – Einstellungen";
+        Text = T("settingsTitle");
         Icon = OverlayWindow.AppIcon();
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = MinimizeBox = false;
-        StartPosition = FormStartPosition.CenterScreen;
-        TopMost = true;
-        ShowInTaskbar = true;
-        BackColor = Bg;
-        ForeColor = Fg;
-        Font = new Font("Segoe UI", 9.5f);
+        BackColor = Palette.Background; ForeColor = Palette.Text;
+        Font = new Font("Segoe UI", 10);
         AutoScaleMode = AutoScaleMode.Dpi;
-        AutoSize = true;
-        AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        Padding = new Padding(16, 12, 16, 12);
-
-        void Save()
+        StartPosition = FormStartPosition.CenterScreen;
+        ClientSize = new Size(620, 590); MinimumSize = new Size(560, 540);
+        TopMost = true; MaximizeBox = false; Padding = new Padding(18);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.Controls.Add(new Label { Text = T("tagline"), AutoSize = true, ForeColor = Palette.Visible,
+            Font = new Font(Font.FontFamily, 19, FontStyle.Bold), Margin = new Padding(0, 0, 0, 8) });
+        layout.Controls.Add(Note("intro"));
+        var tabs = new TabControl { Dock = DockStyle.Fill, Margin = new Padding(0, 12, 0, 12) };
+        layout.Controls.Add(tabs);
+        TableLayoutPanel Page(string key)
         {
-            settings.Save();
-            applied();
+            var page = new TabPage(T(key)) { BackColor = Palette.Background, ForeColor = Palette.Text, AutoScroll = true, Padding = new Padding(16) };
+            var grid = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, Dock = DockStyle.Top };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            page.Controls.Add(grid); tabs.TabPages.Add(page); return grid;
         }
-
-        var grid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Fill, BackColor = Bg };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        void Section(string title)
+        void Save() { settings.Save(); applied(); }
+        void Heading(TableLayoutPanel panel, string key) => panel.Controls.Add(new Label { Text = T(key), AutoSize = true,
+            Font = new Font(Font, FontStyle.Bold), ForeColor = Palette.Me, Margin = new Padding(0, 10, 0, 5) });
+        void Row(TableLayoutPanel panel, string key, Control control)
         {
-            var l = new Label { Text = title, AutoSize = true, ForeColor = Accent, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(0, 10, 0, 4) };
-            grid.Controls.Add(l);
-            grid.SetColumnSpan(l, 2);
+            var line = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Dock = DockStyle.Top, Margin = new Padding(0, 3, 0, 6) };
+            line.Controls.Add(new Label { Text = T(key), Width = 185, AutoSize = false, Height = 28, TextAlign = ContentAlignment.MiddleLeft });
+            control.AccessibleName = T(key); line.Controls.Add(control); panel.Controls.Add(line);
         }
-
-        void Row(string label, Control control)
+        ComboBox Combo(string[] labels, int index, Action<int> change)
         {
-            grid.Controls.Add(new Label { Text = label, AutoSize = true, ForeColor = Fg, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 12, 6) });
-            control.Margin = new Padding(0, 3, 0, 3);
-            grid.Controls.Add(control);
+            var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 205, BackColor = Field, ForeColor = Palette.Text };
+            c.Items.AddRange(labels); c.SelectedIndex = Math.Max(0, index);
+            c.SelectedIndexChanged += (_, _) => change(c.SelectedIndex); return c;
         }
-
-        void Full(Control control)
+        void Check(TableLayoutPanel panel, string key, bool value, Action<bool> change)
         {
-            grid.Controls.Add(control);
-            grid.SetColumnSpan(control, 2);
+            var c = new CheckBox { Text = T(key), AccessibleName = T(key), AutoSize = true, MaximumSize = new Size(510, 0),
+                Checked = value, Margin = new Padding(0, 6, 0, 6) };
+            c.CheckedChanged += (_, _) => change(c.Checked); panel.Controls.Add(c);
         }
-
-        // ---- sound
-        Section("Ton bei neuem Cube");
-        var sound = Check("Ton abspielen", settings.SoundEnabled);
-        sound.CheckedChanged += (_, _) => { settings.SoundEnabled = sound.Checked; Save(); };
-        var test = Btn("Testen");
-        test.Click += (_, _) => actions.TestSound();
-        Full(Flow(sound, test));
-
-        var volume = new TrackBar { Minimum = 5, Maximum = 100, TickFrequency = 10, SmallChange = 5, LargeChange = 10, Width = 200,
-            Value = Math.Clamp(settings.SoundVolumePct, 5, 100), BackColor = Bg };
-        var volumeText = new Label { AutoSize = true, ForeColor = Muted, Text = $"{volume.Value} %", Margin = new Padding(6, 8, 0, 0) };
-        // Play the sound at the new volume once the slider rests (not on every step while dragging).
-        var preview = new System.Windows.Forms.Timer { Interval = 200 };
-        preview.Tick += (_, _) => { preview.Stop(); actions.TestSound(); };
-        Disposed += (_, _) => preview.Dispose();
-        volume.ValueChanged += (_, _) =>
+        void Slider(TableLayoutPanel panel, string key, int min, int value, Action<int> change)
         {
-            settings.SoundVolumePct = volume.Value;
-            volumeText.Text = $"{volume.Value} %";
-            Save();
-            preview.Stop();
-            preview.Start();
-        };
-        Row("Lautstärke", Flow(volume, volumeText));
-
-        var file = new TextBox { Width = 230, ReadOnly = true, BackColor = Field, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle, Text = settings.SoundFile ?? "" };
-        var browse = Btn("Durchsuchen …");
-        browse.Click += (_, _) =>
-        {
-            using var dlg = new OpenFileDialog { Filter = "WAV-Dateien (*.wav)|*.wav", Title = "Sound für neue Cubes" };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            settings.SoundFile = file.Text = dlg.FileName;
-            Save();
-        };
-        var clear = Btn("Standard-Piepton");
-        clear.Click += (_, _) => { settings.SoundFile = null; file.Text = ""; Save(); };
-        Row("Eigene .wav (optional)", Flow(file, browse, clear));
-
-        Section("Gegner");
-        var enemies = Check("Gegner mit Fraktion und PvP-Rang anzeigen", settings.ShowEnemies);
-        enemies.CheckedChanged += (_, _) => { settings.ShowEnemies = enemies.Checked; Save(); };
-        Full(enemies);
-        if (actions.SetFaction is { } setFaction)
-        {
-            string[] values = ["Auto", "Elyos", "Asmodian"];
-            var faction = Combo(["Automatisch (eigener Charakter)", "Elyos", "Asmodier"],
-                Math.Max(0, Array.IndexOf(values, actions.GetFaction?.Invoke() ?? settings.OwnFaction)));
-            faction.SelectedIndexChanged += (_, _) => setFaction(values[faction.SelectedIndex]);
-            Row("Eigene Fraktion", faction);
+            var line = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            var bar = new TrackBar { Minimum = min, Maximum = 100, Value = value, TickStyle = TickStyle.None, Width = 155, BackColor = Palette.Background, AccessibleName = T(key) };
+            var number = new Label { Text = $"{value} %", AutoSize = true, Margin = new Padding(2, 8, 0, 0) };
+            bar.ValueChanged += (_, _) => { number.Text = $"{bar.Value} %"; change(bar.Value); };
+            line.Controls.Add(bar); line.Controls.Add(number); Row(panel, key, line);
         }
-        Full(new Label { Text = "Nur sicher zugeordnete Gegner. Rang 19/17/16/15/14 per Screenshot beobachtet; * = angenommene Rangfolge. " +
-                                "Bei Start mitten in der Sitzung ggf. eigene Fraktion wählen.",
-            AutoSize = true, ForeColor = Muted, MaximumSize = new Size(420, 0), Margin = new Padding(0, 0, 0, 4) });
-
-        // ---- overlay look
-        Section("Overlay");
-        var range = Combo(OverlayWindow.Ranges.Select(r => $"{r} m"), Array.IndexOf(OverlayWindow.Ranges, settings.OverlayRangeM));
-        range.SelectedIndexChanged += (_, _) => { settings.OverlayRangeM = OverlayWindow.Ranges[range.SelectedIndex]; Save(); };
-        Row("Zoom (auch Mausrad)", range);
-
-        int[] scales = [75, 100, 125, 150];
-        var scale = Combo(scales.Select(s => $"{s} %"), Array.IndexOf(scales, settings.OverlayScalePct));
-        scale.SelectedIndexChanged += (_, _) => { settings.OverlayScalePct = scales[scale.SelectedIndex]; Save(); };
-        Row("Größe", scale);
-
-        TrackBar Opacity(string label, int value, Action<int> set)
+        var radar = Page("tabRadar");
+        Heading(radar, "appearance");
+        Row(radar, "range", Combo(OverlayWindow.Ranges.Select(r => $"{r} m").ToArray(), Array.IndexOf(OverlayWindow.Ranges, settings.OverlayRangeM), i => { settings.OverlayRangeM = OverlayWindow.Ranges[i]; Save(); }));
+        int[] sizes = [75, 100, 125, 150];
+        Row(radar, "size", Combo(sizes.Select(s => $"{s} %").ToArray(), Array.IndexOf(sizes, settings.OverlayScalePct), i => { settings.OverlayScalePct = sizes[i]; Save(); }));
+        Slider(radar, "opacity", 40, settings.OverlayOpacityPct, v => { settings.OverlayOpacityPct = v; Save(); });
+        string[] axes = ["-y", "+y", "+x", "-x"];
+        var north = Combo([T("defaultNorth"), "+Y", "+X", "−X"], Array.IndexOf(axes, actions.GetNorth()), i => actions.SetNorth(axes[i]));
+        _tips.SetToolTip(north, T("northHelp")); Row(radar, "north", north);
+        Heading(radar, "visibility");
+        Check(radar, "focused", settings.OverlayOnlyWhenGameFocused, v => { settings.OverlayOnlyWhenGameFocused = v; Save(); });
+        Check(radar, "menus", settings.OverlayHideInMenus, v => { settings.OverlayHideInMenus = v; Save(); });
+        radar.Controls.Add(Note("visibilityHelp")); radar.Controls.Add(Button("resetPosition", resetPosition));
+        var audio = Page("tabSound");
+        Check(audio, "soundEnabled", settings.SoundEnabled, v => { settings.SoundEnabled = v; Save(); });
+        Slider(audio, "soundVolume", 5, settings.SoundVolumePct, v => { settings.SoundVolumePct = v; Save(); });
+        Heading(audio, "soundFile");
+        var file = new TextBox { ReadOnly = true, Width = 470, BackColor = Field, ForeColor = Palette.Text, Text = settings.SoundFile ?? "", AccessibleName = T("soundFile") };
+        audio.Controls.Add(file);
+        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top };
+        buttons.Controls.Add(Button("browse", () =>
         {
-            var bar = new TrackBar { Minimum = 40, Maximum = 100, TickFrequency = 10, SmallChange = 5, LargeChange = 10, Width = 200,
-                Value = Math.Clamp(value, 40, 100), BackColor = Bg };
-            var text = new Label { AutoSize = true, ForeColor = Muted, Text = $"{bar.Value} %", Margin = new Padding(6, 8, 0, 0) };
-            bar.ValueChanged += (_, _) => { set(bar.Value); text.Text = $"{bar.Value} %"; Save(); };
-            Row(label, Flow(bar, text));
-            return bar;
-        }
-        Opacity("Deckkraft Radar", settings.OverlayOpacityPct, v => settings.OverlayOpacityPct = v);
-        var listOpacity = Opacity("Deckkraft Namensliste", settings.OverlayListOpacityPct ?? settings.OverlayOpacityPct,
-            v => settings.OverlayListOpacityPct = v);
-        listOpacity.Enabled = enemies.Checked; // without enemies there is no list below the radar
-        enemies.CheckedChanged += (_, _) => listOpacity.Enabled = enemies.Checked;
-
-        var north = Combo(Norths.Select(n => n.Text), Math.Max(0, Array.FindIndex(Norths, n => n.Value == actions.GetNorth())));
-        north.SelectedIndexChanged += (_, _) => actions.SetNorth(Norths[north.SelectedIndex].Value);
-        Row("Norden", north);
-        Full(new Label { Text = "Passt die Richtung nicht zur Minimap, hier umstellen (gilt auch für die Web-Ansicht).",
-            AutoSize = true, ForeColor = Muted, MaximumSize = new Size(420, 0), Margin = new Padding(0, 0, 0, 4) });
-
-        // ---- visibility
-        Section("Wann ist das Overlay sichtbar?");
-        var focus = Check("Nur wenn Aion 2 im Vordergrund ist", settings.OverlayOnlyWhenGameFocused);
-        focus.CheckedChanged += (_, _) => { settings.OverlayOnlyWhenGameFocused = focus.Checked; Save(); };
-        Full(focus);
-        var menus = Check("In Menüs ausblenden (solange der Mauszeiger sichtbar ist)", settings.OverlayHideInMenus);
-        menus.CheckedChanged += (_, _) => { settings.OverlayHideInMenus = menus.Checked; Save(); };
-        Full(menus);
-        var admin = Check("Mit Admin-Rechten starten, damit Alt erkannt wird", settings.OverlayAdminRights);
-        admin.CheckedChanged += (_, _) => { settings.OverlayAdminRights = admin.Checked; Save(); };
-        admin.Enabled = menus.Checked;
-        menus.CheckedChanged += (_, _) => admin.Enabled = menus.Checked;
-        admin.Margin = new Padding(20, 3, 0, 0);
-        Full(admin);
-        Full(new Label { Text = "Hältst du in Aion 2 Alt, erscheint der Mauszeiger. Ob dabei Alt gedrückt ist, sieht Cube Radar nur mit " +
-                                "Admin-Rechten (Aion 2 läuft selbst mit ihnen); sonst blendet Alt das Overlay wie ein Menü aus. " +
-                                "Wirkt ab dem nächsten Start, Windows fragt dann nach." +
-                                (Elevation.IsElevated ? "" : "\nGerade läuft Cube Radar ohne Admin-Rechte."),
-            AutoSize = true, ForeColor = Muted, MaximumSize = new Size(400, 0), Margin = new Padding(20, 0, 0, 4) });
-
-        // ---- updates (single exe only)
-        if (actions.Updater is { } updater)
-        {
-            Section("Updates");
-            var auto = Check("Automatisch nach Updates suchen (beim Start und alle 6 Stunden, bei GitHub)", settings.UpdateCheckEnabled);
-            auto.CheckedChanged += (_, _) => updater.SetEnabled(auto.Checked);
-            Full(auto);
-            var state = new Label { AutoSize = true, ForeColor = Muted, MaximumSize = new Size(420, 0), Margin = new Padding(0, 2, 0, 2) };
-            var check = Btn("Jetzt prüfen");
-            check.Click += (_, _) => _ = updater.CheckAsync();
-            var install = Btn("Jetzt aktualisieren");
-            install.Click += (_, _) => confirmUpdate();
-            var page = Btn("Versionen auf GitHub");
-            page.Click += (_, _) => updater.OpenPage();
-            void Refresh()
-            {
-                state.Text = $"Installiert: {Updater.Current.ToString(3)} · {updater.State}";
-                check.Enabled = !updater.Installing;
-                install.Enabled = updater.Available is not null && !updater.Installing;
-            }
-            void OnChanged()
-            {
-                try
-                {
-                    if (IsHandleCreated) BeginInvoke(Refresh);
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
-                {
-                    // the window is closing
-                }
-            }
-            Refresh();
-            updater.Changed += OnChanged;
-            Disposed += (_, _) => updater.Changed -= OnChanged;
-            Full(state);
-            Full(Flow(check, install, page));
-        }
-
-        // ---- actions
-        Section("Sonstiges");
-        var reset = Btn("Position zurücksetzen");
-        reset.Click += (_, _) => resetPosition();
-        var web = Btn("Web-Ansicht öffnen");
-        web.Click += (_, _) => actions.OpenWeb();
-        var captures = Btn("Aufnahmen-Ordner öffnen");
-        captures.Click += (_, _) => actions.OpenCaptures();
-        Full(Flow(reset, web, captures));
-        Full(new Label { Text = "Solange dieses Fenster offen ist, bleibt das Overlay sichtbar: zum Verschieben mit der Maus ziehen, " +
-                                "Mausrad darüber = Zoom.\nHotkeys (Strg+Umschalt): F10 = Overlay an/aus · F11 = Einstellungen auf/zu · F12 = Zoom",
-            AutoSize = true, ForeColor = Muted, MaximumSize = new Size(420, 0), Margin = new Padding(0, 8, 0, 0) });
-
-        var quit = Btn("Radar beenden");
-        quit.ForeColor = Danger;
-        quit.FlatAppearance.BorderColor = Danger;
-        quit.Click += (_, _) => { Close(); actions.Quit(); };
-        var close = Btn("Schließen");
-        close.Click += (_, _) => Close();
-        var bottom = Flow(quit, close);
-        bottom.Margin = new Padding(0, 14, 0, 0);
-        Full(bottom);
-
-        Controls.Add(grid);
+            using var dialog = new OpenFileDialog { Filter = T("wavFilter"), Title = T("wavTitle") };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            settings.SoundFile = file.Text = dialog.FileName; Save();
+        }));
+        buttons.Controls.Add(Button("defaultSound", () => { settings.SoundFile = null; file.Text = ""; Save(); }));
+        buttons.Controls.Add(Button("testSound", actions.TestSound)); audio.Controls.Add(buttons); audio.Controls.Add(Note("soundHelp"));
+        var help = Page("tabHelp");
+        Heading(help, "helpTitle");
+        foreach (var key in new[] { "legend", "shortcuts", "privacy", "limit" }) help.Controls.Add(Note(key));
+        help.Controls.Add(Button("dataFolder", actions.OpenData));
+        var bottom = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
+        var close = Button("close", Close); close.DialogResult = DialogResult.Cancel; CancelButton = close;
+        bottom.Controls.Add(close); bottom.Controls.Add(Button("quit", () => { Close(); actions.Quit(); }));
+        layout.Controls.Add(bottom); Controls.Add(layout);
     }
-
-    /// <summary>Renders the window to a PNG without showing it (for checking the layout).</summary>
-    public static void SavePng(string path, RadarSettings settings, OverlayActions actions)
+    private static Label Note(string key) => new() { Text = T(key), AutoSize = true, MaximumSize = new Size(510, 0),
+        ForeColor = Palette.Muted, Margin = new Padding(0, 4, 0, 12) };
+    private Button Button(string key, Action action)
     {
-        var t = new Thread(() =>
+        var b = new Button { Text = T(key), AccessibleName = T(key), AutoSize = true, FlatStyle = FlatStyle.Flat,
+            BackColor = Field, ForeColor = Palette.Text, Padding = new Padding(10, 5, 10, 5), Margin = new Padding(0, 8, 8, 0) };
+        b.FlatAppearance.BorderColor = Palette.Line; b.Click += (_, _) => action(); return b;
+    }
+    protected override void Dispose(bool disposing) { if (disposing) _tips.Dispose(); base.Dispose(disposing); }
+    public static void SavePng(string directory, RadarSettings settings, OverlayActions actions)
+    {
+        var thread = new Thread(() =>
         {
-            // Controls are only created when the window is shown: show it far off-screen, without taking the focus.
-            using var form = new SettingsForm(settings, actions, () => { }, () => { }, () => { })
-            {
-                StartPosition = FormStartPosition.Manual,
-                Location = new Point(-30_000, -30_000),
-                ShowInTaskbar = false,
-                _preview = true,
-            };
+            using var form = new SettingsForm(settings, actions, () => { }, () => { })
+            { _preview = true, StartPosition = FormStartPosition.Manual, Location = new Point(-30000, -30000), ShowInTaskbar = false };
             form.Show();
-            Application.DoEvents();
-            using var bmp = new Bitmap(form.Width, form.Height);
-            form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
-            bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            var tabs = form.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<TabControl>().Single();
+            for (var i = 0; i < tabs.TabCount; i++)
+            {
+                tabs.SelectedIndex = i; Application.DoEvents();
+                using var image = new Bitmap(form.Width, form.Height);
+                form.DrawToBitmap(image, new Rectangle(0, 0, form.Width, form.Height));
+                image.Save(Path.Combine(directory, $"parametres-{i + 1}.png"));
+            }
         });
-        t.SetApartmentState(ApartmentState.STA);
-        t.Start();
-        t.Join();
-    }
-
-    private static CheckBox Check(string text, bool value) =>
-        new() { Text = text, Checked = value, AutoSize = true, ForeColor = Fg, Margin = new Padding(0, 3, 0, 3) };
-
-    private static Button Btn(string text)
-    {
-        var b = new Button { Text = text, AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Field, ForeColor = Fg, Padding = new Padding(6, 1, 6, 1) };
-        b.FlatAppearance.BorderColor = Color.FromArgb(60, 70, 82);
-        return b;
-    }
-
-    private static ComboBox Combo(IEnumerable<string> items, int selected)
-    {
-        var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 140, BackColor = Field, ForeColor = Fg, FlatStyle = FlatStyle.Flat };
-        c.Items.AddRange(items.Cast<object>().ToArray());
-        c.SelectedIndex = Math.Max(0, selected);
-        return c;
-    }
-
-    private static FlowLayoutPanel Flow(params Control[] controls)
-    {
-        var f = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Bg, Margin = new Padding(0) };
-        foreach (var c in controls)
-        {
-            c.Margin = new Padding(0, 3, 8, 3);
-            f.Controls.Add(c);
-        }
-        return f;
+        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
     }
 }

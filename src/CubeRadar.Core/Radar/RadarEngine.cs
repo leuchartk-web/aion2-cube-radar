@@ -1,3 +1,4 @@
+using static CubeRadar.Core.Localization.Text;
 using CubeRadar.Core.Protocol;
 
 namespace CubeRadar.Core.Radar;
@@ -50,6 +51,7 @@ public sealed partial class RadarEngine
 {
     private readonly object _gate = new();
     private readonly RadarConfig _cfg;
+    private readonly bool _trackPlayers;
     private readonly IRadarStore? _store;
     private readonly SpotIndex? _spots;
     private Orientation _north;
@@ -86,9 +88,10 @@ public sealed partial class RadarEngine
         public bool Sampled { get; set; }
     }
 
-    public RadarEngine(RadarConfig cfg, IRadarStore? store = null, SpotIndex? spots = null)
+    public RadarEngine(RadarConfig cfg, IRadarStore? store = null, SpotIndex? spots = null, bool trackPlayers = true)
     {
         _cfg = cfg;
+        _trackPlayers = trackPlayers;
         _store = store;
         _spots = spots;
         _north = Orientation.Parse(cfg.North);
@@ -160,7 +163,7 @@ public sealed partial class RadarEngine
                     _selfFromInfo = true;
                     SetSelf(self);
                 }
-                OnSelfIdentity(body);
+                if (_trackPlayers) OnSelfIdentity(body);
                 break;
             case RecordKind.MapLoad:
                 if (body.Length >= 8) OnMap((int)Wire.U32(body, 4), t);
@@ -200,7 +203,7 @@ public sealed partial class RadarEngine
                 }
                 break;
             default:
-                OnPlayerRecord(kind, t, body);
+                if (_trackPlayers) OnPlayerRecord(kind, t, body);
                 break;
         }
     }
@@ -551,7 +554,7 @@ public sealed partial class RadarEngine
                 _cfg.FixFreshSeconds,
                 Frames)
             {
-                Players = PlayerViews(now, ox, oy, oz),
+                Players = _trackPlayers ? PlayerViews(now, ox, oy, oz) : [],
                 OwnFaction = EffectiveOwnFaction.ToString(),
                 FactionSetting = _configuredFaction == PlayerFaction.Unknown ? "Auto" : _configuredFaction.ToString(),
             };
@@ -568,9 +571,9 @@ public sealed partial class RadarEngine
             var last = _lastKind.GetValueOrDefault(rule.Kind);
             var since = last == 0 ? now - _startMs : now - last;
             if (since > rule.WithinSeconds * 1000L)
-                warnings.Add($"{rule.Kind} ({OpcodeBook.Hex(_cfg.OpcodeOf(rule.Kind))}) seit {since / 1000} s nicht gesehen: {rule.Hint}");
+                warnings.Add(T("missingRecord", rule.Kind, OpcodeBook.Hex(_cfg.OpcodeOf(rule.Kind)), since / 1000, rule.Hint));
         }
-        if (SelfId is null && now - _startMs > 30_000) warnings.Add("eigene Entity-ID noch unbekannt (kein 33 36 / keine eigenen Buffs)");
+        if (SelfId is null && now - _startMs > 30_000) warnings.Add(T("selfUnknown"));
         return warnings;
     }
 

@@ -1,3 +1,4 @@
+using static CubeRadar.Core.Localization.Text;
 using System.Text.Json;
 using CubeRadar.Core.Protocol;
 
@@ -89,7 +90,7 @@ public sealed class RadarConfig
         var opcodes = new Dictionary<ushort, RecordKind>();
         foreach (var p in r.GetProperty("opcodes").EnumerateObject())
         {
-            if (!OpcodeBook.TryParse(p.Value.GetString() ?? "", out var op)) throw new FormatException($"radar.json: bad opcode for {p.Name}");
+            if (!OpcodeBook.TryParse(p.Value.GetString() ?? "", out var op)) throw new FormatException(T("configOpcode", p.Name));
             opcodes[op] = ParseKind(p.Name);
         }
 
@@ -172,6 +173,6 @@ public sealed class RadarConfig
         "player_move" => RecordKind.PlayerMove,
         "player_move_alt" => RecordKind.PlayerMoveAlt,
         "player_move_velocity" => RecordKind.PlayerMoveVelocity,
-        _ => throw new FormatException($"radar.json: unknown record kind \"{name}\""),
+        _ => throw new FormatException(T("configRecord", name)),
     };
 }

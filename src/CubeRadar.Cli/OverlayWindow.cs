@@ -5,7 +5,7 @@ using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using CubeRadar.Core.Radar;
-using CubeRadar.Core.Update;
+using static CubeRadar.Core.Localization.Text;
 
 namespace CubeRadar.Cli;
 
@@ -34,7 +34,7 @@ internal sealed class OverlayWindow : Form
     private readonly Func<RadarSnapshot> _snapshot;
     private readonly RadarSettings _settings;
     private readonly OverlayActions _actions;
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 150 };
+    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 250 };
     private SettingsForm? _settingsForm;
     private RadarSnapshot? _last;
     private int _ticks;
@@ -44,7 +44,6 @@ internal sealed class OverlayWindow : Form
     private long _cursorShownSince = -1;
     private bool _cursorByAlt;
     private NotifyIcon? _tray;
-    private ToolStripMenuItem? _updateItem;
 
     public OverlayWindow(Func<RadarSnapshot> snapshot, RadarSettings settings, OverlayActions actions)
     {
@@ -57,7 +56,7 @@ internal sealed class OverlayWindow : Form
         StartPosition = FormStartPosition.Manual;
         BackColor = Palette.Background;
         DoubleBuffered = true;
-        Text = "Cube Radar Overlay";
+        Text = T("app");
         ApplySettings();
         var p = new Point(settings.OverlayX ?? 0, settings.OverlayY ?? 0);
         Location = settings.OverlayX is not null && OnSomeScreen(p) ? p : DefaultLocation();
@@ -135,7 +134,7 @@ internal sealed class OverlayWindow : Form
     /// <summary>Re-reads size and opacity (called after every change in the settings window).</summary>
     public void ApplySettings()
     {
-        Size = OverlayRenderer.Measure(RenderScale, _settings.ShowEnemies);
+        Size = OverlayRenderer.Measure(RenderScale);
         Redraw();
     }
 
@@ -149,9 +148,8 @@ internal sealed class OverlayWindow : Form
         if (!IsHandleCreated || size.Width <= 0 || size.Height <= 0) return;
         using var frame = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(frame))
-            OverlayRenderer.Render(g, size, _last, RenderScale, _settings.OverlayRangeM, _settings.ShowEnemies);
-        OverlayRenderer.ApplyOpacity(frame, RenderScale, Math.Clamp(_settings.OverlayOpacityPct, 40, 100),
-            Math.Clamp(_settings.OverlayListOpacityPct ?? _settings.OverlayOpacityPct, 40, 100));
+            OverlayRenderer.Render(g, size, _last, RenderScale, _settings.OverlayRangeM);
+        OverlayRenderer.ApplyOpacity(frame, Math.Clamp(_settings.OverlayOpacityPct, 40, 100));
         var bitmap = frame.GetHbitmap(Color.FromArgb(0)); // premultiplied alpha, as UpdateLayeredWindow needs it
         var dc = CreateCompatibleDC(IntPtr.Zero);
         var old = SelectObject(dc, bitmap);
@@ -176,7 +174,7 @@ internal sealed class OverlayWindow : Form
             _settingsForm.Activate();
             return;
         }
-        _settingsForm = new SettingsForm(_settings, _actions, ApplySettings, ResetPosition, ConfirmUpdate);
+        _settingsForm = new SettingsForm(_settings, _actions, ApplySettings, ResetPosition);
         _settingsForm.Show();
     });
 
@@ -242,64 +240,22 @@ internal sealed class OverlayWindow : Form
     public void ShowTray() => Ui(() =>
     {
         var menu = new ContextMenuStrip();
-        _updateItem = new ToolStripMenuItem { Visible = false, Font = new Font(menu.Font, FontStyle.Bold) };
-        _updateItem.Click += (_, _) => ConfirmUpdate();
-        menu.Items.Add(_updateItem);
-        menu.Items.Add("Einstellungen … (Strg+Umschalt+F11)", null, (_, _) => OpenSettings());
-        menu.Items.Add("Overlay ein/aus (Strg+Umschalt+F10)", null, (_, _) => ToggleVisible());
-        menu.Items.Add("Zoom wechseln (Strg+Umschalt+F12)", null, (_, _) => CycleRange());
-        menu.Items.Add("Web-Ansicht öffnen", null, (_, _) => _actions.OpenWeb());
-        menu.Items.Add("Aufnahmen-Ordner öffnen", null, (_, _) => _actions.OpenCaptures());
+        menu.Items.Add(T("traySettings"), null, (_, _) => OpenSettings());
+        menu.Items.Add(T("toggle"), null, (_, _) => ToggleVisible());
+        menu.Items.Add(T("zoom"), null, (_, _) => CycleRange());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Beenden", null, (_, _) => _actions.Quit());
+        menu.Items.Add(T("quit"), null, (_, _) => _actions.Quit());
         _tray = new NotifyIcon
         {
             Icon = AppIcon(),
-            Text = "Cube Radar",
+            Text = T("app"),
             ContextMenuStrip = menu,
             Visible = true,
         };
         _tray.DoubleClick += (_, _) => OpenSettings();
-        _tray.BalloonTipClicked += (_, _) => ConfirmUpdate();
-        if (_actions.Updater is { } updater) updater.Found += OnUpdateFound;
     });
 
-    /// <summary>A newer version exists: tray entry plus a one-time notification (it never takes the focus).</summary>
-    private void OnUpdateFound(ReleaseInfo release) => Ui(() =>
-    {
-        if (_tray is null || _updateItem is null) return;
-        var version = release.Version.ToString(3);
-        _updateItem.Text = release.Installable ? $"Update auf {version} installieren …" : $"Version {version} herunterladen …";
-        _updateItem.Visible = true;
-        _tray.ShowBalloonTip(10_000, "Cube Radar", $"Version {version} ist verfügbar. Zum Aktualisieren hier klicken.", ToolTipIcon.Info);
-    });
-
-    /// <summary>Asks before installing the available update; without a verifiable exe it offers the release page.</summary>
-    public void ConfirmUpdate() => Ui(async () =>
-    {
-        if (_actions.Updater is not { Available: { } release, Installing: false } updater) return;
-        var version = release.Version.ToString(3);
-        // The settings window is topmost: an unowned message box could open hidden behind it.
-        var owner = SettingsOpen ? _settingsForm : null;
-        DialogResult Ask(string text, MessageBoxIcon icon) => MessageBox.Show(owner, text, "Cube Radar – Update", MessageBoxButtons.YesNo, icon);
-
-        if (!release.Installable)
-        {
-            if (Ask($"Cube Radar {version} ist verfügbar, kann sich aber nicht selbst installieren.\n\nRelease-Seite öffnen?",
-                    MessageBoxIcon.Information) == DialogResult.Yes)
-                updater.OpenPage();
-            return;
-        }
-        if (Ask($"Cube Radar {version} ist verfügbar (installiert: {Updater.Current.ToString(3)}).\n\n" +
-                "Jetzt herunterladen und installieren? Das Radar startet danach neu, Einstellungen und Daten bleiben erhalten.",
-                MessageBoxIcon.Question) != DialogResult.Yes)
-            return;
-        _tray?.ShowBalloonTip(5_000, "Cube Radar", $"Version {version} wird heruntergeladen …", ToolTipIcon.Info);
-        if (await updater.InstallAsync() is { } error
-            && Ask($"Das Update hat nicht geklappt:\n\n{error}\n\nRelease-Seite öffnen, um es von Hand herunterzuladen?",
-                MessageBoxIcon.Warning) == DialogResult.Yes)
-            updater.OpenPage();
-    });
+    public void Notify(string message) => Ui(() => _tray?.ShowBalloonTip(8000, T("alertTitle"), message, ToolTipIcon.Info));
 
     /// <summary>The program icon (assets/cuberadar.ico, compiled into the exe); a drawn glyph if that fails.</summary>
     public static Icon AppIcon()
@@ -342,10 +298,11 @@ internal sealed class OverlayWindow : Form
     private void Tick()
     {
         UpdateVisibility();
+        _timer.Interval = Visible ? 250 : 1000;
         if (!Visible) return;
         _last = _snapshot();
         // Some games push themselves to the top when they regain focus: re-assert every 2 s.
-        if (++_ticks % 13 == 0) SetWindowPos(Handle, HwndTopmost, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+        if (++_ticks % 8 == 0) SetWindowPos(Handle, HwndTopmost, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
         Redraw();
     }
 
@@ -464,31 +421,31 @@ internal sealed class OverlayWindow : Form
 
 internal static class Palette
 {
-    public static readonly Color Background = Color.FromArgb(14, 18, 23);
+    public static readonly Color Background = Color.FromArgb(12, 23, 32);
     public static readonly Color Text = Color.FromArgb(230, 235, 240);
     public static readonly Color Muted = Color.FromArgb(139, 150, 163);
-    public static readonly Color Line = Color.FromArgb(48, 58, 70);
-    public static readonly Color Visible = Color.FromArgb(61, 220, 132);
+    public static readonly Color Line = Color.FromArgb(42, 66, 80);
+    public static readonly Color Visible = Color.FromArgb(85, 230, 175);
     public static readonly Color OutOfView = Color.FromArgb(242, 179, 61);
     public static readonly Color Opening = Color.FromArgb(255, 225, 77);
-    public static readonly Color Me = Color.FromArgb(77, 163, 255);
+    public static readonly Color Me = Color.FromArgb(109, 189, 255);
     public static readonly Color Warn = Color.FromArgb(255, 107, 91);
 }
 
 /// <summary>Draws the mini radar; also used to render a PNG for checking the layout.</summary>
 internal static class OverlayRenderer
 {
-    private const float Side = 230, Header = 22, Margin = 14, EnemyFooter = 104;
+    private const float Side = 260, Header = 30, Margin = 21, Footer = 40;
     private const double LevelMetres = 3, SendRadiusM = 100;
 
-    public static Size Measure(float scale, bool showEnemies = true) =>
-        new((int)(Side * scale), (int)((Side + Header + (showEnemies ? EnemyFooter : 0)) * scale));
+    public static Size Measure(float scale) =>
+        new((int)(Side * scale), (int)((Side + Header + Footer) * scale));
 
     /// <summary>The settings button in the header, in client pixels.</summary>
     public static Rectangle GearRect(float scale) =>
         Rectangle.Round(new RectangleF((Side - 24) * scale, 1 * scale, 22 * scale, Header * scale - 2 * scale));
 
-    public static void Render(Graphics g, Size size, RadarSnapshot? s, float scale, int rangeM, bool showEnemies = true)
+    public static void Render(Graphics g, Size size, RadarSnapshot? s, float scale, int rangeM)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
@@ -498,30 +455,33 @@ internal static class OverlayRenderer
         using var small = new Font("Segoe UI", 8f, FontStyle.Bold, GraphicsUnit.Point);
         using var label = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point);
         using var tiny = new Font("Segoe UI", 7f, FontStyle.Regular, GraphicsUnit.Point);
-        using var rankFont = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point);
 
         using (var border = new Pen(Palette.Line, 1))
-            g.DrawRectangle(border, 0.5f, 0.5f, Side - 1, Side + Header + (showEnemies ? EnemyFooter : 0) - 1);
+            g.DrawRectangle(border, 0.5f, 0.5f, Side - 1, Side + Header + Footer - 1);
 
         // header: name, own position age, range
-        Text(g, "CUBE RADAR", small, Palette.Muted, 7, 4);
-        Text(g, $"{rangeM} m", small, Palette.Muted, Side - 27, 4, right: true);
+        Text(g, T("radarTitle"), small, Palette.Visible, 10, 8);
+        Text(g, $"{rangeM} m", small, Palette.Muted, Side - 32, 8, right: true);
         using (var gear = new Font("Segoe UI Symbol", 10.5f, FontStyle.Regular, GraphicsUnit.Point))
-            Text(g, "⚙", gear, Palette.Text, Side - 13, 1, center: true);
+            Text(g, "⚙", gear, Palette.Text, Side - 14, 6, center: true);
+        var active = s?.Cubes.Where(c => c.Status is nameof(CubeStatus.Visible) or nameof(CubeStatus.Opening)).ToList() ?? [];
+        var nearest = active.Where(c => c.DistanceM is not null).OrderBy(c => c.DistanceM).FirstOrDefault();
+        Text(g, nearest is null ? T("noCubes") : T("nearest", nearest.DistanceM), small, Palette.Text, 10, Header + Side + 2);
+        Text(g, T("cubeCount", active.Count), tiny, Palette.Muted, 10, Header + Side + 21);
         var me = Me(s);
         if (s is not null)
         {
             var (posText, posColor) = me switch
             {
                 { Ring: > 0 } m => ($"± {m.Ring / 100:0} m", Palette.OutOfView),
-                { } m => ($"Pos. {m.AgeMs / 1000} s", m.AgeMs <= s.FixFreshSeconds * 1000 ? Palette.Visible : m.AgeMs <= 30_000 ? Palette.OutOfView : Palette.Warn),
-                null => ("Pos. ?", Palette.Warn),
+                { } m => (T("positionAge", m.AgeMs / 1000), m.AgeMs <= s.FixFreshSeconds * 1000 ? Palette.Visible : m.AgeMs <= 30_000 ? Palette.OutOfView : Palette.Warn),
+                null => ("—", Palette.Warn),
             };
             var tw = g.MeasureString(posText, small).Width;
             var px = Side / 2 - tw / 2 + 5;
             using var dot = new SolidBrush(posColor);
-            g.FillEllipse(dot, px - 10, 9, 6, 6);
-            Text(g, posText, small, Palette.Muted, px, 4);
+            g.FillEllipse(dot, px - 10, 13, 6, 6);
+            Text(g, posText, small, Palette.Muted, px, 8);
         }
 
         var cx = Side / 2;
@@ -548,9 +508,8 @@ internal static class OverlayRenderer
 
         if (s is null || me is null)
         {
-            if (showEnemies) EnemyList(g, s, small, tiny);
-            Text(g, s is null ? "wartet auf Daten …" : "eigene Position unbekannt", label, Palette.Muted, cx, cy + r / 2, center: true);
-            if (s is not null) Text(g, "(Buff wirken hilft)", tiny, Palette.Muted, cx, cy + r / 2 + 16, center: true);
+            Text(g, s is null || s.Frames == 0 ? T("waiting") : T("positionUnknown"), label, Palette.Muted, cx, cy + r / 2, center: true);
+            if (s is not null) Text(g, T("positionHint"), tiny, Palette.Muted, cx, cy + r / 2 + 16, center: true);
             return;
         }
 
@@ -630,97 +589,18 @@ internal static class OverlayRenderer
                 Text(g, text, label, color, tx, ty - 7, center: true);
             }
         }
-        if (showEnemies)
-        {
-            // Fresh positions only. Red diamonds cannot be mistaken for green square/height cube markers.
-            const float markerRadius = 10;
-            var placed = new List<RectangleF>();
-            var markers = new List<(PointF Point, PlayerView Player)>();
-            foreach (var p in s.Players.Where(p => p.IsEnemy == true && !p.PositionStale && p.X is not null && p.Y is not null)
-                         .OrderBy(p => p.DistanceM ?? double.MaxValue).Take(12))
-            {
-                var q = ToScreen(p.X!.Value, p.Y!.Value);
-                if (!Inside(q, cx, cy, r - markerRadius - 1))
-                {
-                    var angle = Math.Atan2(q.Y - cy, q.X - cx);
-                    q = new PointF(cx + (float)Math.Cos(angle) * (r - markerRadius - 1), cy + (float)Math.Sin(angle) * (r - markerRadius - 1));
-                }
-                markers.Add((q, p));
-                var name = p.Name.Length > 9 ? p.Name[..9] + "…" : p.Name;
-                var text = $"{name} {(p.DistanceEstimated ? "~" : "")}{p.DistanceM:0}m";
-                var width = g.MeasureString(text, tiny).Width;
-                var x = Math.Clamp(q.X + markerRadius + 4, 3, Math.Max(3, Side - width - 3));
-                var y = Math.Clamp(q.Y - 24, Header + 1, Header + Side - 14);
-                var bounds = new RectangleF(x - 2, y - 1, width + 4, 14);
-                if (!placed.Any(other => other.IntersectsWith(bounds)))
-                {
-                    Text(g, text, tiny, Palette.Warn, x, y);
-                    placed.Add(bounds); // full names/ranks remain in the list if point labels would overlap
-                }
-            }
-            // Paint badges last, nearest on top, so adjacent name labels can never obscure a class glyph.
-            using var red = new SolidBrush(Palette.Warn);
-            using var ink = new SolidBrush(Palette.Background);
-            using var centered = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center,
-                FormatFlags = StringFormatFlags.NoWrap };
-            foreach (var marker in markers.AsEnumerable().Reverse())
-            {
-                var q = marker.Point;
-                PointF[] diamond = [new(q.X, q.Y - markerRadius), new(q.X + markerRadius, q.Y),
-                    new(q.X, q.Y + markerRadius), new(q.X - markerRadius, q.Y)];
-                g.FillPolygon(red, diamond);
-                g.DrawString(marker.Player.RankSymbol, rankFont, ink,
-                    new RectangleF(q.X - markerRadius, q.Y - markerRadius, 2 * markerRadius, 2 * markerRadius), centered);
-            }
-            EnemyList(g, s, small, tiny);
-        }
-    }
-
-    private static void EnemyList(Graphics g, RadarSnapshot? s, Font title, Font detail)
-    {
-        var top = Side + Header;
-        using var line = new Pen(Palette.Line);
-        g.DrawLine(line, 5, top, Side - 5, top);
-        var enemies = s?.Players.Where(p => p.IsEnemy == true).ToList() ?? [];
-        Text(g, $"GEGNER ({enemies.Count})", title, Palette.Warn, 7, top + 3);
-        if (s is null || s.OwnFaction == "Unknown")
-        {
-            Text(g, "Eigene Fraktion unter ⚙ wählen", detail, Palette.OutOfView, 7, top + 26);
-            return;
-        }
-        if (enemies.Count == 0)
-        {
-            Text(g, "Keine zugeordneten Gegner in Sicht", detail, Palette.Muted, 7, top + 26);
-            return;
-        }
-        var state = g.Save();
-        g.SetClip(new RectangleF(5, top + 21, Side - 10, EnemyFooter - 22));
-        var y = top + 24;
-        foreach (var p in enemies.Take(3))
-        {
-            var faction = p.Faction == "Asmodian" ? "Asmodier" : p.Faction;
-            var distance = p.DistanceM is { } d ? $"{(p.PositionStale || p.DistanceEstimated ? "~" : "")}{d:0} m" : "Pos. ?";
-            Text(g, $"{p.Name} · {faction} · {distance}", detail, Palette.Warn, 7, y);
-            var rank = p.RankName ?? (p.RankCode is { } code ? $"Rang-Code {code}" : "Rang unbekannt");
-            if (p.RankCode is not null && !p.RankVerified) rank += " *";
-            if (p.PositionStale && p.PositionAgeMs is { } age) rank += $" · Pos. {age / 1000}s alt";
-            Text(g, rank, detail, Palette.Muted, 7, y + 12);
-            y += 26;
-        }
-        g.Restore(state);
     }
 
     /// <summary>Scales the alpha of the radar (header and map) and of the enemy list below it to the given percentages.</summary>
-    public static void ApplyOpacity(Bitmap frame, float scale, int radarPct, int listPct)
+    public static void ApplyOpacity(Bitmap frame, int radarPct)
     {
-        var listTop = (int)Math.Round((Side + Header) * scale);
         var data = frame.LockBits(new Rectangle(Point.Empty, frame.Size), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
         try
         {
             var row = new byte[frame.Width * 4];
             for (var y = 0; y < frame.Height; y++)
             {
-                var pct = y < listTop ? radarPct : listPct;
+                var pct = radarPct;
                 var line = data.Scan0 + y * data.Stride;
                 Marshal.Copy(line, row, 0, row.Length);
                 for (var i = 3; i < row.Length; i += 4) row[i] = (byte)(row[i] * pct / 100);

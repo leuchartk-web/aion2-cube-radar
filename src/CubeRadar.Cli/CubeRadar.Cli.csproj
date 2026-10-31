@@ -8,10 +8,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>cuberadar</AssemblyName>
-    <Version>0.9.2</Version>
+    <Version>0.9.3</Version>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>..\..\assets\cuberadar.ico</ApplicationIcon>
-    <Product>Cube Radar</Product>
+    <Product>Radar de cubes FR</Product>
     <AssemblyTitle>Cube Radar</AssemblyTitle>
   </PropertyGroup>
 
@@ -22,14 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\CubeRadar.Core\CubeRadar.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- The single "Cube Radar.exe" carries the web UI and the default config inside (see AppPaths). -->
-    <EmbeddedResource Include="wwwroot\**" LogicalName="wwwroot/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\config\*.json" LogicalName="config/%(Filename)%(Extension)" />
   </ItemGroup>
 
