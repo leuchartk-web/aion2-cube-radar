@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: french-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows:
     runs-on: windows-latest
@@ -20,11 +23,12 @@ jobs:
       - name: Tests Python et traductions
         run: python -m unittest discover -s tests -p "test_*.py"
       - name: Aperçus sans jeu ni capture réseau
-        run: dotnet run --project src/CubeRadar.Cli -c Release --no-build -- --preview previews
+        run: dotnet run --project src/CubeRadar.Cli -c Release -- --preview previews
       - name: Compiler et empaqueter
         shell: pwsh
         run: ./tools/package.ps1
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: radar-cubes-fr-windows
           path: |
