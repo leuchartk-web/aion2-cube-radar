@@ -55,7 +55,7 @@ internal static class RadarCommand
         var actions = new OverlayActions(stop.Set, Play, () => engine.North, north =>
         {
             engine.SetNorth(north); settings.North = engine.North; settings.Save();
-        }, () => Elevation.Open(AppPaths.DataRoot));
+        }, () => Elevation.Open(AppPaths.DataRoot), () => sniffer.Status);
         using var keys = new GlobalHotkeys(GlobalHotkeys.Parse("ctrl+shift+F10=visible,ctrl+shift+F11=settings,ctrl+shift+F12=range"), b =>
         {
             if (b.Label == "visible") overlay?.ToggleVisible();

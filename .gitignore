@@ -22,6 +22,8 @@ data/external/
 
 # Test packages
 dist/
+previews/
+TestResults/
 
 # Per-user radar settings (overlay position, sound), created on first start
 data/settings.json

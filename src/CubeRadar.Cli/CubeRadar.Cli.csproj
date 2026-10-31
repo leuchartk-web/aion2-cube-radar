@@ -12,7 +12,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>..\..\assets\cuberadar.ico</ApplicationIcon>
     <Product>Radar de cubes FR</Product>
-    <AssemblyTitle>Cube Radar</AssemblyTitle>
+    <AssemblyTitle>Radar de cubes FR</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,7 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The single "Cube Radar.exe" carries the web UI and the default config inside (see AppPaths). -->
+    <!-- Default protocol configuration is embedded; no web UI or web runtime. -->
     <EmbeddedResource Include="..\..\config\*.json" LogicalName="config/%(Filename)%(Extension)" />
   </ItemGroup>
 

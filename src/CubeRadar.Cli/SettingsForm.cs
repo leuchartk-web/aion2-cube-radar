@@ -4,7 +4,7 @@ using static CubeRadar.Core.Localization.Text;
 
 namespace CubeRadar.Cli;
 
-internal sealed record OverlayActions(Action Quit, Action TestSound, Func<string> GetNorth, Action<string> SetNorth, Action OpenData);
+internal sealed record OverlayActions(Action Quit, Action TestSound, Func<string> GetNorth, Action<string> SetNorth, Action OpenData, Func<string>? GetStatus = null);
 
 /// <summary>Bounded, scrollable native settings. All changes apply immediately.</summary>
 internal sealed class SettingsForm : Form
@@ -98,6 +98,14 @@ internal sealed class SettingsForm : Form
         buttons.Controls.Add(Button("defaultSound", () => { settings.SoundFile = null; file.Text = ""; Save(); }));
         buttons.Controls.Add(Button("testSound", actions.TestSound)); audio.Controls.Add(buttons); audio.Controls.Add(Note("soundHelp"));
         var help = Page("tabHelp");
+        var status = new Label { AutoSize = true, MaximumSize = new Size(510, 0), ForeColor = Palette.Visible, Margin = new Padding(0, 6, 0, 12) };
+        void UpdateStatus() => status.Text = actions.GetStatus?.Invoke() ?? T("captureWaiting");
+        UpdateStatus();
+        var statusTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        statusTimer.Tick += (_, _) => UpdateStatus();
+        statusTimer.Start();
+        Disposed += (_, _) => statusTimer.Dispose();
+        help.Controls.Add(status);
         Heading(help, "helpTitle");
         foreach (var key in new[] { "legend", "shortcuts", "privacy", "limit" }) help.Controls.Add(Note(key));
         help.Controls.Add(Button("dataFolder", actions.OpenData));

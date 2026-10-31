@@ -249,7 +249,7 @@ public sealed partial class RadarEngine
 
     private void OnPosition(PositionFix fix, long t)
     {
-        UpdatePlayerPosition(fix, t);
+        if (_trackPlayers) UpdatePlayerPosition(fix, t);
         _lastFixByEntity[fix.EntityId] = (fix, t);
         if (_lastFixByEntity.Count > 2000)
             foreach (var k in _lastFixByEntity.Where(kv => t - kv.Value.T > 300_000).Select(kv => kv.Key).ToList())

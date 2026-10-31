@@ -329,7 +329,7 @@ internal sealed class OverlayWindow : Form
             _gamePids = CubeRadar.Core.Capture.GameProcessLocator.FindGameProcessIds();
             _gamePidsAt = now;
         }
-        if (_gamePids.Length == 0) return true; // no game running (replay / testing): just show it
+        if (_gamePids.Length == 0) return !_settings.OverlayOnlyWhenGameFocused;
 
         GetWindowThreadProcessId(GetForegroundWindow(), out var pid);
         // Our own window is in front (tray menu, a dialog): leave the overlay as it is. Showing it now would close the
