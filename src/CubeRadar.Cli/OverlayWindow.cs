@@ -24,7 +24,7 @@ namespace CubeRadar.Cli;
 internal sealed class OverlayWindow : Form
 {
     private const int WsExLayered = 0x80000, WsExToolWindow = 0x80, WsExNoActivate = 0x08000000, WsExTopmost = 0x8;
-    private const int WmNcHitTest = 0x84, WmMouseActivate = 0x21, WmExitSizeMove = 0x232, HtCaption = 2, MaNoActivate = 3;
+    private const int WmNcHitTest = 0x84, WmMouseActivate = 0x21, WmEnterSizeMove = 0x231, WmExitSizeMove = 0x232, HtCaption = 2, MaNoActivate = 3;
     private const int CursorShowing = 0x1, VkMenu = 0x12;
     private const byte AcSrcAlpha = 0x1;
     private const int UlwAlpha = 0x2;
@@ -39,11 +39,15 @@ internal sealed class OverlayWindow : Form
     private RadarSnapshot? _last;
     private int _ticks;
     private bool _moving;
+    private bool _placementMode;
     private int[] _gamePids = [];
     private long _gamePidsAt = -10_000;
     private long _cursorShownSince = -1;
     private bool _cursorByAlt;
     private NotifyIcon? _tray;
+    private ToolStripMenuItem? _pauseItem;
+    private ToolStripMenuItem? _moveItem;
+    private bool Paused => _actions.GetPaused?.Invoke() == true;
 
     public OverlayWindow(Func<RadarSnapshot> snapshot, RadarSettings settings, OverlayActions actions)
     {
@@ -60,6 +64,7 @@ internal sealed class OverlayWindow : Form
         ApplySettings();
         var p = new Point(settings.OverlayX ?? 0, settings.OverlayY ?? 0);
         Location = settings.OverlayX is not null && OnSomeScreen(p) ? p : DefaultLocation();
+        ClampToScreen();
         _timer.Tick += (_, _) => Tick();
         _timer.Start();
     }
@@ -101,7 +106,8 @@ internal sealed class OverlayWindow : Form
         {
             case WmNcHitTest:
                 var screen = new Point(unchecked((short)(long)m.LParam), unchecked((short)((long)m.LParam >> 16)));
-                if (OverlayRenderer.GearRect(RenderScale).Contains(PointToClient(screen)))
+                var point = PointToClient(screen);
+                if (OverlayRenderer.GearRect(RenderScale).Contains(point) || OverlayRenderer.PauseRect(RenderScale).Contains(point) || OverlayRenderer.MoveRect(RenderScale).Contains(point))
                 {
                     m.Result = 1; // HTCLIENT: the gear button gets the click
                     return;
@@ -112,8 +118,12 @@ internal sealed class OverlayWindow : Form
             case WmMouseActivate:
                 m.Result = MaNoActivate; // clicking it never takes the focus from the game
                 return;
+            case WmEnterSizeMove:
+                _moving = true;
+                return;
             case WmExitSizeMove:
                 _moving = false;
+                ClampToScreen();
                 _settings.OverlayX = Left;
                 _settings.OverlayY = Top;
                 _settings.Save();
@@ -125,6 +135,8 @@ internal sealed class OverlayWindow : Form
     protected override void OnMouseClick(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left && OverlayRenderer.GearRect(RenderScale).Contains(e.Location)) OpenSettings();
+        else if (e.Button == MouseButtons.Left && OverlayRenderer.PauseRect(RenderScale).Contains(e.Location)) _actions.SetPaused?.Invoke(!Paused);
+        else if (e.Button == MouseButtons.Left && OverlayRenderer.MoveRect(RenderScale).Contains(e.Location)) TogglePlacement();
         base.OnMouseClick(e);
     }
 
@@ -135,6 +147,7 @@ internal sealed class OverlayWindow : Form
     public void ApplySettings()
     {
         Size = OverlayRenderer.Measure(RenderScale);
+        if (IsHandleCreated) ClampToScreen();
         Redraw();
     }
 
@@ -148,7 +161,7 @@ internal sealed class OverlayWindow : Form
         if (!IsHandleCreated || size.Width <= 0 || size.Height <= 0) return;
         using var frame = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(frame))
-            OverlayRenderer.Render(g, size, _last, RenderScale, _settings.OverlayRangeM);
+            OverlayRenderer.Render(g, size, _last, RenderScale, _settings.OverlayRangeM, Paused, _placementMode);
         OverlayRenderer.ApplyOpacity(frame, Math.Clamp(_settings.OverlayOpacityPct, 40, 100));
         var bitmap = frame.GetHbitmap(Color.FromArgb(0)); // premultiplied alpha, as UpdateLayeredWindow needs it
         var dc = CreateCompatibleDC(IntPtr.Zero);
@@ -174,7 +187,10 @@ internal sealed class OverlayWindow : Form
             _settingsForm.Activate();
             return;
         }
-        _settingsForm = new SettingsForm(_settings, _actions, ApplySettings, ResetPosition);
+        _settingsForm = new SettingsForm(_settings, _actions, ApplySettings, ResetPosition, () =>
+        {
+            if (!_placementMode) TogglePlacement();
+        });
         _settingsForm.Show();
     });
 
@@ -196,9 +212,26 @@ internal sealed class OverlayWindow : Form
 
     private Point DefaultLocation()
     {
-        var screen = Screen.PrimaryScreen!.WorkingArea;
-        return new Point(screen.Right - Width - (int)(24 * RenderScale), screen.Top + (int)(300 * RenderScale));
+        var screen = Screen.FromHandle(GetForegroundWindow()).WorkingArea;
+        return new Point(Math.Max(screen.Left, screen.Right - Width - (int)(24 * RenderScale)), screen.Top + (int)(24 * RenderScale));
     }
+
+    private void ClampToScreen()
+    {
+        var screen = Screen.FromRectangle(Bounds).WorkingArea;
+        Location = new Point(Math.Clamp(Left, screen.Left, Math.Max(screen.Left, screen.Right - Width)),
+            Math.Clamp(Top, screen.Top, Math.Max(screen.Top, screen.Bottom - Height)));
+    }
+
+    /// <summary>Placement overrides cursor/menu hiding, so Alt can expose the game's pointer without elevation.</summary>
+    public void TogglePlacement() => Ui(() =>
+    {
+        _placementMode = !_placementMode;
+        if (_placementMode) ClampToScreen();
+        UpdateVisibility();
+        Redraw();
+        if (_placementMode) Notify(T("moveHelp"));
+    });
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
@@ -212,6 +245,7 @@ internal sealed class OverlayWindow : Form
     /// <summary>Ctrl+Shift+F10: the user's on/off switch (auto-hiding works on top of it).</summary>
     public void ToggleVisible() => Ui(() =>
     {
+        _placementMode = false;
         _settings.OverlayVisible = !_settings.OverlayVisible;
         _settings.Save();
         UpdateVisibility();
@@ -241,6 +275,10 @@ internal sealed class OverlayWindow : Form
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add(T("traySettings"), null, (_, _) => OpenSettings());
+        _pauseItem = new ToolStripMenuItem(T(Paused ? "resume" : "pause"), null, (_, _) => _actions.SetPaused?.Invoke(!Paused));
+        _moveItem = new ToolStripMenuItem(T("move"), null, (_, _) => TogglePlacement());
+        menu.Items.Add(_pauseItem);
+        menu.Items.Add(_moveItem);
         menu.Items.Add(T("toggle"), null, (_, _) => ToggleVisible());
         menu.Items.Add(T("zoom"), null, (_, _) => CycleRange());
         menu.Items.Add(new ToolStripSeparator());
@@ -298,7 +336,9 @@ internal sealed class OverlayWindow : Form
     private void Tick()
     {
         UpdateVisibility();
-        _timer.Interval = Visible ? 250 : 1000;
+        if (_pauseItem is not null) _pauseItem.Text = T(Paused ? "resume" : "pause");
+        if (_moveItem is not null) _moveItem.Text = T(_placementMode ? "endMove" : "move");
+        _timer.Interval = Visible && !Paused ? 250 : 1000;
         if (!Visible) return;
         _last = _snapshot();
         // Some games push themselves to the top when they regain focus: re-assert every 2 s.
@@ -308,7 +348,7 @@ internal sealed class OverlayWindow : Form
 
     private void UpdateVisibility()
     {
-        var show = _settings.OverlayVisible && (_moving || WantedOverGame());
+        var show = _moving || _placementMode || SettingsOpen || (!Paused && _settings.OverlayVisible && WantedOverGame());
         if (show == Visible) return;
         if (show)
         {
@@ -365,6 +405,57 @@ internal sealed class OverlayWindow : Form
     {
         _timer.Dispose();
         base.OnFormClosed(e);
+    }
+
+    /// <summary>Native Windows smoke checks on the CI runner, with no game, capture, hotkeys or sound.</summary>
+    internal static void VerifyControls()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var paused = true;
+                var settings = new RadarSettings { OverlayVisible = false, OverlayOnlyWhenGameFocused = false };
+                var engine = new RadarEngine(new RadarConfig(), trackPlayers: false);
+                var actions = new OverlayActions(() => { }, () => { }, () => "-y", _ => { }, () => { },
+                    GetPaused: () => paused, SetPaused: value => paused = value);
+                using var window = new OverlayWindow(engine.Snapshot, settings, actions);
+                _ = window.Handle;
+                void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+                window.UpdateVisibility();
+                Require(!window.Visible, "Paused capture must hide the normal overlay");
+                window.TogglePlacement();
+                Require(window.Visible, "Placement must reveal even a paused or manually hidden overlay");
+                var enter = Message.Create(window.Handle, WmEnterSizeMove, IntPtr.Zero, IntPtr.Zero);
+                window.WndProc(ref enter);
+                window.Location = new Point(-30000, -30000);
+                var exit = Message.Create(window.Handle, WmExitSizeMove, IntPtr.Zero, IntPtr.Zero);
+                window.WndProc(ref exit);
+                Require(!window._moving && settings.OverlayX == window.Left && settings.OverlayY == window.Top,
+                    "Dragging must save the clamped position");
+                Require(Screen.AllScreens.Any(s => s.WorkingArea.Contains(window.Location)), "Radar must remain reachable");
+                window.TogglePlacement();
+                Require(!window.Visible, "Ending placement must return to pause");
+                paused = false;
+                settings.OverlayVisible = true;
+                window.UpdateVisibility();
+                Require(window.Visible, "Active borderless overlay must be visible when focus filtering is disabled");
+                var rect = OverlayRenderer.PauseRect(window.RenderScale);
+                window.OnMouseClick(new MouseEventArgs(MouseButtons.Left, 1, rect.Left + 2, rect.Top + 2, 0));
+                window.Tick();
+                Require(paused && !window.Visible, "Pause button must request pause and hide the radar");
+                paused = false;
+                window.UpdateVisibility();
+                window.ToggleVisible();
+                Require(!window.Visible && !paused, "Hiding must not request a capture pause");
+                window.Close();
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
+        if (failure is not null) throw new InvalidOperationException("Windows overlay interaction checks failed", failure);
+        Console.WriteLine("Windows overlay checks passed: placement, saved bounds, pause button, visibility.");
     }
 
     private static bool OnSomeScreen(Point p) => Screen.AllScreens.Any(s => s.WorkingArea.Contains(p));
@@ -445,7 +536,10 @@ internal static class OverlayRenderer
     public static Rectangle GearRect(float scale) =>
         Rectangle.Round(new RectangleF((Side - 24) * scale, 1 * scale, 22 * scale, Header * scale - 2 * scale));
 
-    public static void Render(Graphics g, Size size, RadarSnapshot? s, float scale, int rangeM)
+    public static Rectangle PauseRect(float scale) => Rectangle.Round(new RectangleF((Side - 63) * scale, (Header + Side) * scale, 59 * scale, 19 * scale));
+    public static Rectangle MoveRect(float scale) => Rectangle.Round(new RectangleF((Side - 72) * scale, (Header + Side + 20) * scale, 68 * scale, 19 * scale));
+
+    public static void Render(Graphics g, Size size, RadarSnapshot? s, float scale, int rangeM, bool paused = false, bool placement = false)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
@@ -460,14 +554,22 @@ internal static class OverlayRenderer
             g.DrawRectangle(border, 0.5f, 0.5f, Side - 1, Side + Header + Footer - 1);
 
         // header: name, own position age, range
-        Text(g, T("radarTitle"), small, Palette.Visible, 10, 8);
+        Text(g, T(placement ? "placementTitle" : "radarTitle"), small, Palette.Visible, 10, 8);
         Text(g, $"{rangeM} m", small, Palette.Muted, Side - 32, 8, right: true);
         using (var gear = new Font("Segoe UI Symbol", 10.5f, FontStyle.Regular, GraphicsUnit.Point))
             Text(g, "⚙", gear, Palette.Text, Side - 14, 6, center: true);
+        if (paused) s = null;
         var active = s?.Cubes.Where(c => c.Status is nameof(CubeStatus.Visible) or nameof(CubeStatus.Opening)).ToList() ?? [];
         var nearest = active.Where(c => c.DistanceM is not null).OrderBy(c => c.DistanceM).FirstOrDefault();
-        Text(g, nearest is null ? T("noCubes") : T("nearest", nearest.DistanceM), small, Palette.Text, 10, Header + Side + 2);
-        Text(g, T("cubeCount", active.Count), tiny, Palette.Muted, 10, Header + Side + 21);
+        Text(g, paused ? T("pausedTitle") : nearest is null ? T("noCubes") : T("nearest", nearest.DistanceM), small, Palette.Text, 10, Header + Side + 2);
+        Text(g, paused ? T("captureOff") : T("cubeCount", active.Count), tiny, Palette.Muted, 10, Header + Side + 21);
+        using (var buttonBorder = new Pen(Palette.Line))
+        {
+            g.DrawRectangle(buttonBorder, Side - 63, Header + Side, 59, 19);
+            g.DrawRectangle(buttonBorder, Side - 72, Header + Side + 20, 68, 19);
+        }
+        Text(g, T(paused ? "resumeShort" : "pauseShort"), tiny, Palette.Visible, Side - 34, Header + Side + 3, center: true);
+        Text(g, T(placement ? "endMoveShort" : "moveShort"), tiny, Palette.Me, Side - 38, Header + Side + 23, center: true);
         var me = Me(s);
         if (s is not null)
         {
@@ -508,8 +610,9 @@ internal static class OverlayRenderer
 
         if (s is null || me is null)
         {
-            Text(g, s is null || s.Frames == 0 ? T("waiting") : T("positionUnknown"), label, Palette.Muted, cx, cy + r / 2, center: true);
-            if (s is not null) Text(g, T("positionHint"), tiny, Palette.Muted, cx, cy + r / 2 + 16, center: true);
+            Text(g, paused ? T("pausedTitle") : s is null || s.Frames == 0 ? T("waiting") : T("positionUnknown"), label, Palette.Muted, cx, cy + r / 2, center: true);
+            if (paused) Text(g, T("resumeHint"), tiny, Palette.Muted, cx, cy + r / 2 + 16, center: true);
+            else if (s is not null) Text(g, T("positionHint"), tiny, Palette.Muted, cx, cy + r / 2 + 16, center: true);
             return;
         }
 
@@ -656,11 +759,11 @@ internal static class OverlayRenderer
     }
 
     /// <summary>One frame as PNG (for checking the layout without a game).</summary>
-    public static void SavePng(string path, RadarSnapshot? s, int rangeM = 120, float scale = 1.5f)
+    public static void SavePng(string path, RadarSnapshot? s, int rangeM = 120, float scale = 1.5f, bool paused = false, bool placement = false)
     {
         var size = Measure(scale);
         using var bmp = new Bitmap(size.Width, size.Height);
-        using (var g = Graphics.FromImage(bmp)) Render(g, size, s, scale, rangeM);
+        using (var g = Graphics.FromImage(bmp)) Render(g, size, s, scale, rangeM, paused, placement);
         bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 }

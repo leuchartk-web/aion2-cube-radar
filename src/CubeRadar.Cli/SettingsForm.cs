@@ -4,7 +4,8 @@ using static CubeRadar.Core.Localization.Text;
 
 namespace CubeRadar.Cli;
 
-internal sealed record OverlayActions(Action Quit, Action TestSound, Func<string> GetNorth, Action<string> SetNorth, Action OpenData, Func<string>? GetStatus = null);
+internal sealed record OverlayActions(Action Quit, Action TestSound, Func<string> GetNorth, Action<string> SetNorth, Action OpenData,
+    Func<string>? GetStatus = null, Func<bool>? GetPaused = null, Action<bool>? SetPaused = null);
 
 /// <summary>Bounded, scrollable native settings. All changes apply immediately.</summary>
 internal sealed class SettingsForm : Form
@@ -21,7 +22,7 @@ internal sealed class SettingsForm : Form
     }
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
-    public SettingsForm(RadarSettings settings, OverlayActions actions, Action applied, Action resetPosition)
+    public SettingsForm(RadarSettings settings, OverlayActions actions, Action applied, Action resetPosition, Action? moveRadar = null)
     {
         Text = T("settingsTitle");
         Icon = OverlayWindow.AppIcon();
@@ -78,6 +79,18 @@ internal sealed class SettingsForm : Form
             line.Controls.Add(bar); line.Controls.Add(number); Row(panel, key, line);
         }
         var radar = Page("tabRadar");
+        var activity = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top };
+        var pause = Button("pause", () => actions.SetPaused?.Invoke(!(actions.GetPaused?.Invoke() ?? false)));
+        void RefreshPause() => pause.Text = T(actions.GetPaused?.Invoke() == true ? "resume" : "pause");
+        RefreshPause();
+        var pauseTimer = new System.Windows.Forms.Timer { Interval = 500 };
+        pauseTimer.Tick += (_, _) => RefreshPause();
+        pauseTimer.Start();
+        Disposed += (_, _) => pauseTimer.Dispose();
+        activity.Controls.Add(pause);
+        activity.Controls.Add(Button("move", () => { moveRadar?.Invoke(); Close(); }));
+        radar.Controls.Add(activity);
+        radar.Controls.Add(Note("moveHelp"));
         Heading(radar, "appearance");
         Row(radar, "range", Combo(OverlayWindow.Ranges.Select(r => $"{r} m").ToArray(), Array.IndexOf(OverlayWindow.Ranges, settings.OverlayRangeM), i => { settings.OverlayRangeM = OverlayWindow.Ranges[i]; Save(); }));
         int[] sizes = [75, 100, 125, 150];

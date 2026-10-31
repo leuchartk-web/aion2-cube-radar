@@ -5,7 +5,7 @@ internal static class AppPaths
 {
     public static string DataRoot { get; private set; } = "";
     public static string DataDir => Path.Combine(DataRoot, "data");
-    public static string Config(string name) => Path.Combine(DataRoot, "app", "0.9.3", "config", name);
+    public static string Config(string name) => Path.Combine(DataRoot, "app", typeof(AppPaths).Assembly.GetName().Version?.ToString(3) ?? "0", "config", name);
     public static void Init()
     {
         DataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CubeRadarFR");

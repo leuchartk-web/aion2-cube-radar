@@ -22,7 +22,10 @@ internal static class Preview
         foreach (var scale in new[] { 1f, 1.25f, 1.5f })
             OverlayRenderer.SavePng(Path.Combine(output, $"radar-{scale:0.00}.png"), snapshot, scale: scale);
         OverlayRenderer.SavePng(Path.Combine(output, "attente.png"), empty);
+        OverlayRenderer.SavePng(Path.Combine(output, "placement.png"), snapshot, placement: true);
+        OverlayRenderer.SavePng(Path.Combine(output, "pause.png"), snapshot, paused: true);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         SettingsForm.SavePng(output, new RadarSettings(), new OverlayActions(() => { }, () => { }, () => "-y", _ => { }, () => { }));
+        OverlayWindow.VerifyControls();
     }
 }

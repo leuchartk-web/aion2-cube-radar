@@ -9,6 +9,7 @@ internal sealed class RadarSettings
     public int? OverlayX { get; set; }
     public int? OverlayY { get; set; }
     public bool OverlayVisible { get; set; } = true;
+    public bool CapturePaused { get; set; }
     public int OverlayRangeM { get; set; } = 120;
     public bool OverlayHideInMenus { get; set; } = true;
     public bool OverlayOnlyWhenGameFocused { get; set; } = true;

@@ -19,11 +19,20 @@ Si Npcap a été installé en mode réservé aux administrateurs, son accès peu
 
 1. Lancer AION 2 puis double-cliquer sur **Radar de cubes FR.exe**.
 2. Les cubes apparaissent avec leur distance et leur hauteur relative.
-3. Cliquer sur **⚙** pour régler le radar ou le déplacer en le faisant glisser.
+3. Appuyer sur **Ctrl + Maj + F9** pour placer le radar : afficher le curseur du jeu (Alt si nécessaire), faire glisser le radar, puis appuyer à nouveau sur ce raccourci ou sur **Terminer**. Les menus du jeu ne le masquent pas pendant le placement.
 4. Utiliser la molette pour changer la portée : 60, 120 ou 250 mètres.
-5. Quitter depuis l’icône près de l’horloge Windows.
+5. Appuyer sur **Ctrl + Maj + F8** pour une vraie pause : la capture réseau et les alertes sont coupées, le radar est masqué. Le même raccourci reprend la détection. La pause est mémorisée au prochain lancement.
+6. **Ctrl + Maj + F10** masque seulement l’affichage. **Quitter**, près de l’horloge, ferme entièrement l’application.
 
 **[Guide français et légende des symboles](docs/GUIDE_FR.md)**
+
+## Fenêtré sans bordure, placement et pause (0.9.4)
+
+Dans les options vidéo d’AION 2, sélectionner **fenêtré sans bordure** (ou fenêtré). Le radar utilise une fenêtre native toujours au-dessus, sans injection dans le jeu. Le plein écran exclusif reste incompatible.
+Les contrôles **Déplacer** et **Pause** sont accessibles directement sous le radar, dans les paramètres et près de l’horloge.
+Le placement reste possible si le radar était masqué ou en pause, et sa position est conservée entre les lancements.
+La pause arrête le moniteur Npcap, ferme la carte de capture, coupe l’audio et abandonne l’état live et les buffers de réassemblage.
+La reprise repart d’un flux neuf : les cubes ne réapparaissent qu’après de nouveaux messages du serveur. L’apprentissage et l’historique persistent.
 
 ## Ce qui change
 
@@ -69,6 +78,7 @@ python -m unittest discover -s tests -p "test_*.py"
 
 Les tests ajoutés comparent le cycle des cubes et la position du joueur entre le moteur amont et le mode sans contacts,
 et vérifient qu’un jeu de messages d’ennemis ne crée aucun contact dans ce mode.
+Des tests de cycle de capture vérifient la pause, la reprise et le lancement en pause. Des contrôles Windows natifs vérifient le placement, la mémorisation des coordonnées et les boutons, sans lancer AION 2 ni Npcap.
 Les tests qui exigent Npcap sont exclus du runner. La compilation et les tests hors ligne ne constituent pas une validation en jeu.
 L’EXE n’est pas signé. Ne désactivez pas les protections Windows ; consultez les sources, le workflow et les sommes SHA-256 avant toute utilisation.
 

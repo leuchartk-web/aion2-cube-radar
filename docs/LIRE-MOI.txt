@@ -1,4 +1,4 @@
-RADAR DE CUBES FR — 0.9.3
+RADAR DE CUBES FR — 0.9.4
 
 Prérequis : Windows 10/11 x64, Npcap installé séparément, AION 2 Global en mode fenêtré ou sans bordure.
 Extraire le ZIP puis lancer Radar de cubes FR.exe. Aucun lancement automatique avec Windows.

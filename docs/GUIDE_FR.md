@@ -7,7 +7,18 @@ Le radar ne l’installe pas et n’altère pas son installation.
 Fermer une ancienne instance, extraire le ZIP de la version française puis lancer **Radar de cubes FR.exe**.
 Le radar attend la connexion du jeu et affiche ses données lorsqu’elles sont reçues.
 Pour fermer complètement l’application : icône près de l’horloge → **Quitter**.
-Masquer le radar ne ferme pas l’application ni sa capture pendant que le jeu reste connecté.
+Pour ne plus utiliser le radar en jeu, appuyer sur **Ctrl + Maj + F8** : la capture Npcap et les alertes s’arrêtent et le radar se masque. Le même raccourci reprend la capture. Cette pause est mémorisée entre les lancements.
+**Ctrl + Maj + F10** masque uniquement l’affichage ; sa capture continue si elle était active.
+
+## Fenêtré sans bordure et déplacement en jeu
+
+Dans les options vidéo du jeu, choisir **fenêtré sans bordure** (ou fenêtré), et non plein écran exclusif.
+Appuyer sur **Ctrl + Maj + F9** ou choisir **Déplacer** depuis le radar, ses paramètres ou son icône près de l’horloge.
+Le radar reste alors affiché même si le curseur ou un menu du jeu est visible. Faire apparaître le curseur (Alt si nécessaire),
+puis cliquer-glisser le radar jusqu’à la position voulue. Cliquer sur **Terminer** ou appuyer de nouveau sur **Ctrl + Maj + F9**.
+La position est enregistrée à la fin du déplacement et ramenée sur un écran accessible si elle dépasse ses bords.
+Ce mode permet aussi de placer un radar qui était masqué ou en pause, sans reprendre sa capture.
+Le radar reste sans bordure et ne demande pas de droits administrateur pour le placement.
 
 ## Lire le radar
 
@@ -43,6 +54,8 @@ Tout est sauvegardé immédiatement ; **Fermer** referme uniquement les paramèt
 
 | Raccourci | Action |
 | --- | --- |
+| Ctrl + Maj + F8 | Mettre en pause / reprendre la capture et les alertes |
+| Ctrl + Maj + F9 | Activer / terminer le placement |
 | Ctrl + Maj + F10 | Afficher / masquer |
 | Ctrl + Maj + F11 | Ouvrir / fermer les paramètres |
 | Ctrl + Maj + F12 | Changer la portée |
@@ -63,6 +76,8 @@ Le radar ne peut pas deviner un cube que le serveur n’a pas envoyé depuis son
 Un patch du jeu peut rendre ses codes réseau obsolètes ; consulter le dépôt avant de remplacer des fichiers.
 Pour un VPN, l’option avancée `radar --device NOM` permet de sélectionner une carte Npcap.
 Si Npcap est réservé aux administrateurs, le radar peut ne pas pouvoir ouvrir la carte sans droits suffisants.
+
+À la reprise après une pause, l’état live et les anciens buffers réseau sont vidés pour ne pas présenter de vieux cubes comme actuels. Les cubes réapparaissent au fil des nouveaux messages du serveur ; quitter puis relancer le jeu peut être nécessaire si le serveur ne renvoie pas les objets déjà proches. L’apprentissage et l’historique des cubes sont conservés.
 
 Les mises à jour se téléchargent manuellement depuis les versions de **leuchartk-web/aion2-cube-radar**.
 L’application ne vérifie ni ne télécharge de mise à jour automatiquement.
